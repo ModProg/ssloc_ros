@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.0)
+project(ssloc)
+
+find_package(catkin REQUIRED)
+catkin_package()
+
+add_custom_target(ssloc
+   ALL
+   COMMAND cargo build --release --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml --target-dir ${CMAKE_BINARY_DIR}/cargo
+   COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/cargo/release/ssloc ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ssloc
+   COMMENT "Building ssloc!!!"
+)
