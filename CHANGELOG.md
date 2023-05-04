@@ -9,5 +9,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v0.1.0] 
 **Initial Release**
 
-[unreleased]: https://github.com/{{ github_user }}/{{ project_name }}/compare/v0.1.0...HEAD
-[v0.1.0]: https://github.com/{{ github_user }}/{{ project_name }}/tree/v0.1.0
+[unreleased]: https://github.com/ModProg/ssloc.ros/compare/v0.1.0...HEAD
+[v0.1.0]: https://github.com/ModProg/ssloc.ros/tree/v0.1.0
