@@ -246,10 +246,10 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             .group(MBSS_GROUP),
             Property::new_default_range(
                 "max_sources",
-                self.mbss.min_angle,
-                5f64.to_radians(),
-                1f64.to_radians(),
-                20f64.to_radians(),
+                self.max_sources,
+                5,
+                1,
+                20,
             )
             .description("maximal number of detected sources")
             .group(MBSS_GROUP),
@@ -359,8 +359,7 @@ fn main() {
                 };
 
                 'mbss: while rosrust::is_ok() {
-                    let mbss =
-                        mbss_config.create(config.mics[..config.channels as usize].to_owned());
+                    let mbss = config.mbss.create(config.mics[..config.channels as usize].to_owned());
                     while rosrust::is_ok() {
                         let max_sources = {
                             let update = updating_config.read();
@@ -390,6 +389,7 @@ fn main() {
                             max_sources,
                         );
                         for (idx, (az, el, strength)) in sources.into_iter().enumerate() {
+                            ros_info!("{strength}");
                             let rotation = UnitQuaternion::from_euler_angles(0., -el, az).coords;
                             if let Err(e) = markers.send(msgs::Marker {
                                 header: msgs::Header {
@@ -419,8 +419,8 @@ fn main() {
                                     ..Default::default()
                                 },
                                 scale: msgs::Vector3 {
-                                    // x: (strength / 2000.).clamp(0.2, 2.),
-                                    x: 1.,
+                                     x: (strength / 6000.).clamp(0.2, 2.),
+                                    // x: 1.,
                                     y: 0.2,
                                     z: 0.2,
                                 },
