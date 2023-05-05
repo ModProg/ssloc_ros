@@ -17,7 +17,7 @@ mod msgs {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct Device {
+struct Device { 
     name: String,
     description: String,
     channels: (u16, u16),
@@ -36,6 +36,17 @@ impl From<&Device> for Variant {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct MessageConfig  {
+    unit_sst: bool,
+    unit_ssl: bool,
+    point_cloud: bool,
+    pose_array: bool,
+    arrow: bool,
+    angle_sst: bool,
+    angle_ssl: bool
+}
+
 #[derive(Debug, Clone)]
 struct Config {
     format: Format,
@@ -47,6 +58,7 @@ struct Config {
     mics: Vec<Position>,
     max_sources: u16,
     mbss: MbssConfig,
+    messages: MessageConfig
 }
 impl Config {
     fn init() -> anyhow::Result<Config> {
@@ -339,7 +351,6 @@ fn main() {
         let markers = rosrust::publish("~markers", 20).unwrap();
 
         let mut config = updating_config.copy();
-        let mbss_config = MbssConfig::default();
 
         'recorder: while rosrust::is_ok() {
             for_format!(config.format, {

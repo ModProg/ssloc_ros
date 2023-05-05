@@ -1,0 +1,5 @@
+# A single SSL on the unit sphere
+float64 x
+float64 y
+float64 z
+float64 E
