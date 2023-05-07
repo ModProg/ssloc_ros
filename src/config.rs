@@ -1,25 +1,21 @@
 use std::f64::consts::PI;
-use std::time::Duration;
-use std::{iter, thread};
+use std::iter;
 
-use lib::{for_format, AudioRecorder, Format, MbssConfig, Position};
-use nalgebra::UnitQuaternion;
-use rosrust::ros_err;
+use alsa::device_name::{Hint, HintIter};
+use alsa::pcm::HwParams;
+use alsa::{Direction, PCM};
+use lib::{Format, MbssConfig, Position};
+use nalgebra::vector;
+use rosrust::ros_info;
+use rosrust_dynamic_reconfigure::{Group, GroupType, Property, Type, Value, Variant};
 
-mod msgs {
-    pub use rosrust_msg::geometry_msgs::*;
-    pub use rosrust_msg::std_msgs::{ColorRGBA, Header};
-    pub use rosrust_msg::visualization_msgs::*;
-}
-
-==== BASE ====
 #[derive(Debug, Clone, PartialEq)]
-struct Device {
-    name: String,
-    description: String,
-    channels: (u16, u16),
-    rate: (u16, u16),
-    formats: Vec<Format>,
+pub struct Device {
+    pub name: String,
+    pub description: String,
+    pub channels: (u16, u16),
+    pub rate: (u16, u16),
+    pub formats: Vec<Format>,
 }
 
 impl From<&Device> for Variant {
@@ -33,20 +29,29 @@ impl From<&Device> for Variant {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MsgConfig {
+    arrow_markers: bool,
+    unit_sphere_directions: bool,
+    unit_sphere_directions_odas: bool,
+    source_audio: bool,
+}
+
 #[derive(Debug, Clone)]
-struct Config {
-    format: Format,
-    rate: u16,
-    device: Device,
-    devices: Vec<Device>,
-    localisation_frame: f64,
-    channels: u16,
-    mics: Vec<Position>,
-    max_sources: u16,
-    mbss: MbssConfig,
+pub struct Config {
+    pub format: Format,
+    pub rate: u16,
+    pub device: Device,
+    pub devices: Vec<Device>,
+    pub localisation_frame: f64,
+    pub channels: u16,
+    pub mics: Vec<Position>,
+    pub max_sources: u16,
+    pub mbss: MbssConfig,
+    pub messages: MsgConfig,
 }
 impl Config {
-    fn init() -> anyhow::Result<Config> {
+    pub fn init() -> anyhow::Result<Config> {
         let devices: Vec<_> = HintIter::new_str(None, "pcm")?
             .chain(iter::once(Hint {
                 name: Some("default".into()),
@@ -314,140 +319,5 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             other => return Err(format!("unexpected field: {other}").into()),
         }
         Ok(())
-    }
-}
-==== BASE ====
-
-fn main() {
-    env_logger::init();
-
-    rosrust::init("ssloc");
-
-    let mut config_server =
-        rosrust_dynamic_reconfigure::Server::<Config>::new(Config::init().unwrap()).unwrap();
-
-    let updating_config = config_server.get_config_updating();
-
-    thread::spawn(move || {
-        let markers = rosrust::publish("~markers", 20).unwrap();
-
-        let mut config = updating_config.copy();
-
-        'recorder: while rosrust::is_ok() {
-            for_format!(config.format, {
-                let mut recorder = match AudioRecorder::<FORMAT>::new(
-                    config.device.name.clone(),
-                    config.channels.into(),
-                    config.rate.into(),
-                    config.format,
-                    config.localisation_frame,
-                ) {
-                    Ok(recorder) => recorder,
-                    Err(e) => {
-                        ros_err!("error creating the audio recorder {e}");
-                        thread::sleep(Duration::from_secs(1));
-                        continue;
-                    }
-                };
-
-                'mbss: while rosrust::is_ok() {
-                    let mbss = config.mbss.create(config.mics[..config.channels as usize].to_owned());
-                    while rosrust::is_ok() {
-                        let max_sources = {
-                            let update = updating_config.read();
-                            if update.channels != config.channels
-                                || update.device != config.device
-                                || update.rate != config.rate
-                                || update.format != config.format
-                                || update.localisation_frame != config.localisation_frame
-                            {
-                                config = update.clone();
-                                continue 'recorder;
-                            }
-                            if update.mics != config.mics || update.mbss != config.mbss {
-                                config = update.clone();
-                                continue 'mbss;
-                            }
-                            update.max_sources.into()
-                        };
-                        let sources = mbss.locate_spec(
-                            match &recorder.record() {
-                                Ok(audio) => audio,
-                                Err(err) => {
-                                    ros_err!("error recording audio {err}");
-                                    continue 'recorder;
-                                }
-                            },
-                            max_sources,
-                        );
-                        for (idx, (az, el, strength)) in sources.into_iter().enumerate() {
-                            let rotation = UnitQuaternion::from_euler_angles(0., -el, az).coords;
-                            if let Err(e) = markers.send(msgs::Marker {
-                                header: msgs::Header {
-                                    stamp: rosrust::now(),
-                                    frame_id: "ssloc".to_string(),
-                                    ..Default::default()
-                                },
-                                ns: "sslocate".to_string(),
-                                id: idx as i32 + 1,
-                                type_: msgs::Marker::ARROW as i32,
-                                pose: msgs::Pose {
-                                    position: msgs::Point {
-                                        x: 0.,
-                                        y: 0.,
-                                        z: 0.,
-                                    },
-                                    orientation: msgs::Quaternion {
-                                        x: rotation.x,
-                                        y: rotation.y,
-                                        z: rotation.z,
-                                        w: rotation.w,
-                                    },
-                                },
-                                color: msgs::ColorRGBA {
-                                    r: 1.,
-                                    a: 1.,
-                                    ..Default::default()
-                                },
-                                scale: msgs::Vector3 {
-                                    // x: (strength / 2000.).clamp(0.2, 2.),
-                                    x: 1.,
-                                    y: 0.2,
-                                    z: 0.2,
-                                },
-                                action: msgs::Marker::ADD as i32,
-                                lifetime: rosrust::Duration::from_seconds(1),
-                                ..Default::default()
-                            }) {
-                                ros_err!("error sending marker {e}");
-                            };
-                        }
-                    }
-                }
-            })
-        }
-    });
-
-    // Create object that maintains 10Hz between sleep requests
-    let rate = rosrust::rate(10.0);
-
-    // Breaks when a shutdown signal is sent
-    while rosrust::is_ok() {
-        // // Create string message
-        // let msg = rosrust_msg::std_msgs::String {
-        //     data: format!("hello world from rosrust {}", count),
-        // };
-
-        // Log event
-        // rosrust::ros_info!("Publishing: {:?}", msg);
-
-        // Send string message to topic via publisher
-
-        // if log_names {
-        //     rosrust::ros_info!("Subscriber names: {:?}",
-        // chatter_pub.subscriber_names()); }
-
-        // Sleep to maintain 10Hz rate
-        rate.sleep();
     }
 }
