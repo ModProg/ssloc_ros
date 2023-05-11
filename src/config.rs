@@ -32,7 +32,9 @@ impl From<&Device> for Variant {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MsgConfig {
     arrow_markers: bool,
-    unit_sphere_directions: bool,
+    unit_sphere_ssl: bool,
+    unit_sphere_points: bool,
+    #[cfg(feature = "odas")]
     unit_sphere_directions_odas: bool,
     source_audio: bool,
 }
@@ -48,11 +50,13 @@ pub struct Config {
     pub mics: Vec<Position>,
     pub max_sources: u16,
     pub mbss: MbssConfig,
+    pub mbss_ssl_threashold: f64,
     pub messages: MsgConfig,
 }
 impl Config {
-    pub fn init() -> anyhow::Result<Config> {
-        let devices: Vec<_> = HintIter::new_str(None, "pcm")?
+    pub fn init() -> rosrust::api::error::Result<Config> {
+        let devices: Vec<_> = HintIter::new_str(None, "pcm")
+            .map_err(|e| e.to_string())?
             .chain(iter::once(Hint {
                 name: Some("default".into()),
                 desc: Some("System Default".into()),
@@ -110,6 +114,15 @@ impl Config {
             mics: vec![vector!(0., 0., 0.); 20],
             max_sources: 5,
             mbss: MbssConfig::default(),
+            messages: MsgConfig {
+                arrow_markers: false,
+                unit_sphere_ssl: false,
+                unit_sphere_points: true,
+                #[cfg(feature = "odas")]
+                unit_sphere_directions_odas: false,
+                source_audio: false,
+            },
+            mbss_ssl_threashold: 5000.,
         })
     }
 }
@@ -200,6 +213,14 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             )
             .group(AUDIO_GROUP),
             Property::new_enum("pooling", "max", ["max", "sum"]).group(MBSS_GROUP),
+            Property::new_default_range(
+                "mbss_ssl_threashold",
+                self.mbss_ssl_threashold,
+                1.,
+                5_000.,
+                10_000.,
+            )
+            .group(MBSS_GROUP),
             // TODO spectrum_method
             Property::new_default_range("azimuth_min", self.mbss.azimuth_range.0, -PI, -PI, PI)
                 .group(MBSS_GROUP),
@@ -316,6 +337,7 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             "alpha_res" => self.mbss.alpha_res = value.as_float(name)?,
             "min_angle" => self.mbss.min_angle = value.as_float(name)?,
             "max_sources" => self.max_sources = value.as_int(name)? as u16,
+            "mbss_ssl_threashold" => self.mbss_ssl_threashold = value.as_float(name)?,
             other => return Err(format!("unexpected field: {other}").into()),
         }
         Ok(())

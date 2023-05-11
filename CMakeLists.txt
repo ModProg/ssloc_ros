@@ -1,8 +1,19 @@
 cmake_minimum_required(VERSION 3.0)
 project(ssloc)
 
-find_package(catkin REQUIRED)
-catkin_package()
+find_package(catkin REQUIRED COMPONENTS message_generation std_msgs)
+add_message_files(
+   DIRECTORY msg
+   FILES
+   Audio.msg
+   UnitSsl.msg
+   UnitSslArray.msg
+   UnitSst.msg
+   UnitSstArray.msg
+)
+
+generate_messages(DEPENDENCIES std_msgs)
+catkin_package(CATKIN_DEPENDS message_runtime std_msgs)
 
 add_custom_target(ssloc
    ALL
@@ -10,3 +21,4 @@ add_custom_target(ssloc
    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/cargo/release/ssloc ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ssloc
    COMMENT "Building ssloc!!!"
 )
+
