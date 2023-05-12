@@ -17,7 +17,7 @@ catkin_package(CATKIN_DEPENDS message_runtime std_msgs)
 
 add_custom_target(ssloc
    ALL
-   COMMAND cargo build --release --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml --target-dir ${CMAKE_BINARY_DIR}/cargo
+   COMMAND ${CMAKE_COMMAND} -E env ROSRUST_MSG_PATH=${CMAKE_CURRENT_SOURCE_DIR}/../../ cargo build --release --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml --target-dir ${CMAKE_BINARY_DIR}/cargo
    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/cargo/release/ssloc ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ssloc
    COMMENT "Building ssloc!!!"
 )

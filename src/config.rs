@@ -14,7 +14,7 @@ pub struct Device {
     pub name: String,
     pub description: String,
     pub channels: (u16, u16),
-    pub rate: (u16, u16),
+    pub rate: (u16, u16),   
     pub formats: Vec<Format>,
 }
 
@@ -31,12 +31,13 @@ impl From<&Device> for Variant {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MsgConfig {
-    arrow_markers: bool,
-    unit_sphere_ssl: bool,
-    unit_sphere_points: bool,
+    pub arrow_markers: bool,
+    pub unit_sphere_ssl: bool,
+    pub unit_sphere_points: bool,
     #[cfg(feature = "odas")]
     unit_sphere_directions_odas: bool,
-    source_audio: bool,
+    pub source_audio: bool,
+    pub spectrum_image: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -121,6 +122,7 @@ impl Config {
                 #[cfg(feature = "odas")]
                 unit_sphere_directions_odas: false,
                 source_audio: false,
+                spectrum_image: false,
             },
             mbss_ssl_threashold: 5000.,
         })
@@ -130,6 +132,7 @@ impl Config {
 const AUDIO_GROUP: i32 = 100;
 const MIC_GROUP: i32 = 200;
 const MBSS_GROUP: i32 = 300;
+const MESSAGE_GROUP: i32 = 400;
 
 impl rosrust_dynamic_reconfigure::Config for Config {
     fn clean_up(&mut self) {
@@ -175,6 +178,13 @@ impl rosrust_dynamic_reconfigure::Config for Config {
                 parent: 0,
                 type_: GroupType::Tab,
             },
+            Group {
+                name: "Message Settings".into(),
+                state: false,
+                id: MESSAGE_GROUP,
+                parent: 0,
+                type_: GroupType::Tab,
+            },
         ];
         groups.extend((0..self.channels).map(|c| Group {
             name: format!("Mic {c}"),
@@ -216,8 +226,8 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             Property::new_default_range(
                 "mbss_ssl_threashold",
                 self.mbss_ssl_threashold,
-                1.,
                 5_000.,
+                1.,
                 10_000.,
             )
             .group(MBSS_GROUP),
@@ -269,13 +279,23 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             .group(MBSS_GROUP),
             Property::new_default_range(
                 "max_sources",
-                self.mbss.min_angle,
-                5f64.to_radians(),
-                1f64.to_radians(),
-                20f64.to_radians(),
+                self.max_sources,
+                5,
+                1,
+                20,
             )
             .description("maximal number of detected sources")
             .group(MBSS_GROUP),
+            Property::new("arrow_markers", self.messages.arrow_markers)
+            .group(MESSAGE_GROUP),
+            Property::new("unit_sphere_ssl", self.messages.unit_sphere_ssl)
+            .group(MESSAGE_GROUP),
+            Property::new("unit_sphere_points", self.messages.unit_sphere_points)
+            .group(MESSAGE_GROUP),
+            Property::new("source_audio", self.messages.source_audio)
+            .group(MESSAGE_GROUP),
+            Property::new("spectrum_image", self.messages.spectrum_image)
+            .group(MESSAGE_GROUP),
         ];
         props.extend(self.mics.iter().enumerate().flat_map(|(idx, mic)| {
             vec![
@@ -338,6 +358,11 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             "min_angle" => self.mbss.min_angle = value.as_float(name)?,
             "max_sources" => self.max_sources = value.as_int(name)? as u16,
             "mbss_ssl_threashold" => self.mbss_ssl_threashold = value.as_float(name)?,
+            "arrow_markers" => self.messages.arrow_markers = value.as_bool(name)?,
+            "unit_sphere_ssl" => self.messages.unit_sphere_ssl = value.as_bool(name)?,
+            "unit_sphere_points" => self.messages.unit_sphere_points = value.as_bool(name)?,
+            "source_audio" => self.messages.source_audio = value.as_bool(name)?,
+            "spectrum_image" => self.messages.spectrum_image = value.as_bool(name)?,
             other => return Err(format!("unexpected field: {other}").into()),
         }
         Ok(())

@@ -65,15 +65,17 @@ fn main() -> Result {
                                 frame_id: "ssloc".to_string(),
                                 ..Default::default()
                             };
-                            let update = updating_config.read();
-                            if update.channels != config.channels
-                                || update.device != config.device
-                                || update.rate != config.rate
-                                || update.format != config.format
-                                || update.localisation_frame != config.localisation_frame
                             {
-                                config = update.clone();
-                                continue 'recorder;
+                                let update = updating_config.read();
+                                if update.channels != config.channels
+                                    || update.device != config.device
+                                    || update.rate != config.rate
+                                    || update.format != config.format
+                                    || update.localisation_frame != config.localisation_frame
+                                {
+                                    config = update.clone();
+                                    continue 'recorder;
+                                }
                             }
                             let audio = match recorder.record() {
                                 Ok(audio) => audio,
@@ -123,8 +125,9 @@ fn main() -> Result {
         .spawn(move || -> Result {
             let arrow_markers = rosrust::publish::<msgs::Marker>("~arrow_markers", 20)?;
             let unit_sphere_ssl = rosrust::publish::<msgs::UnitSslArray>("~unit_sphere_ssl", 20)?;
-            let unit_sphere_points = rosrust::publish::<msgs::PointCloud2>("~unit_sphere_points", 20)?;
-            let spectrums = rosrust::publish::<msgs::CompressedImage>("~spectrum", 20)?;
+            let unit_sphere_points =
+                rosrust::publish::<msgs::PointCloud2>("~unit_sphere_points", 20)?;
+            let spectrums = rosrust::publish::<msgs::CompressedImage>("~spectrum/compressed", 20)?;
 
             let mut config = updating_config.copy();
 
@@ -158,16 +161,86 @@ fn main() -> Result {
                         continue;
                     }
                     let spectrum = mbss.analyze_spectrum(&audio);
-                    let mut data: Vec<u8> = Vec::new();
-                    lib::spec_to_image(spectrum.view())
-                        .write_to(&mut Cursor::new(&mut data), ImageOutputFormat::Png)
-                        .unwrap();
-                    if let Err(e) = spectrums.send(msgs::CompressedImage {
-                        header: header.clone(),
-                        format: "png".to_string(),
-                        data,
-                    }) {
-                        ros_err!("error sending spectrum image {e}");
+                    if config.messages.spectrum_image {
+                        let mut data: Vec<u8> = Vec::new();
+                        lib::spec_to_image(spectrum.view())
+                            .write_to(&mut Cursor::new(&mut data), ImageOutputFormat::Png)
+                            .unwrap();
+                        if let Err(e) = spectrums.send(msgs::CompressedImage {
+                            header: header.clone(),
+                            format: "png".to_string(),
+                            data,
+                        }) {
+                            ros_err!("error sending spectrum image {e}");
+                        }
+                    }
+                    if config.messages.unit_sphere_ssl || config.messages.unit_sphere_points {
+                        let locations =
+                            mbss.unit_sphere_spectrum(spectrum.view(), config.mbss_ssl_threashold);
+
+                        if config.messages.unit_sphere_ssl {
+                            if let Err(e) = unit_sphere_ssl.send(msgs::UnitSslArray {
+                                header: header.clone(),
+                                sources: locations
+                                    .iter()
+                                    .map(|(position, e)| msgs::UnitSsl {
+                                        x: position.x,
+                                        y: position.y,
+                                        z: position.z,
+                                        E: *e,
+                                    })
+                                    .collect(),
+                            }) {
+                                ros_err!("error sending unit sphere ssl {e}");
+                            }
+                        }
+                        if config.messages.unit_sphere_points {
+                            if let Err(e) = unit_sphere_points.send(msgs::PointCloud2 {
+                                header: header.clone(),
+                                fields: vec![
+                                    msgs::PointField {
+                                        name: "x".to_owned(),
+                                        offset: 0,
+                                        datatype: msgs::PointField::FLOAT32,
+                                        count: 1,
+                                    },
+                                    msgs::PointField {
+                                        name: "y".to_owned(),
+                                        offset: 4,
+                                        datatype: msgs::PointField::FLOAT32,
+                                        count: 1,
+                                    },
+                                    msgs::PointField {
+                                        name: "z".to_owned(),
+                                        offset: 8,
+                                        datatype: msgs::PointField::FLOAT32,
+                                        count: 1,
+                                    },
+                                    msgs::PointField {
+                                        name: "intensity".to_owned(),
+                                        offset: 12,
+                                        datatype: msgs::PointField::FLOAT32,
+                                        count: 1,
+                                    },
+                                ],
+                                is_bigendian: false,
+                                point_step: 16,
+                                data: locations
+                                    .iter()
+                                    .flat_map(|(position, e)| {
+                                        [position.x, position.y, position.z, *e]
+                                            .into_iter()
+                                            .flat_map(|c| (c as f32).to_le_bytes())
+                                    })
+                                    .collect(),
+                                height: 1,
+                                width: locations.len() as u32,
+                                row_step: locations.len() as u32,
+                                is_dense: true,
+                            }) {
+                                ros_err!("error sending unit sphere ssl {e}");
+                            }
+                        }
                     }
 
                     let sources = mbss.find_sources(spectrum.view(), max_sources);

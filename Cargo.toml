@@ -21,8 +21,9 @@ image = { version = "0.24.6", default-features = false, features = ["png"] }
 lib = { package = "ssloc", git = "https://github.com/ModProg/ssloc" }
 nalgebra = "0.32.2"
 rosrust = "0.9"
-# rosrust_dynamic_reconfigure = { version = "0.1.0", path = "../../../../../Development/Rust/rosrust_dynamic_reconfigure" }
-rosrust_dynamic_reconfigure.git = "https://github.com/ModProg/rosrust_dynamic_reconfigure"
+#rosrust_dynamic_reconfigure = { version = "0.1.0", path = "../../../../../Development/Rust/rosrust_dynamic_reconfigure" }
+rosrust_dynamic_reconfigure = { version = "0.1.0", path = "../../../rosrust_dynamic_reconfigure" }
+#rosrust_dynamic_reconfigure.git = "https://github.com/ModProg/rosrust_dynamic_reconfigure"
 rosrust_msg = "0.1"
 wav = "1.0.0"
 
