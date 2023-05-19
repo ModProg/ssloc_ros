@@ -52,7 +52,6 @@ pub struct Config {
     pub max_sources: u16,
     pub mbss: MbssConfig,
     pub mbss_ssl_threashold: f64,
-    pub messages: MsgConfig,
 }
 impl Config {
     pub fn init() -> rosrust::api::error::Result<Config> {
@@ -115,15 +114,6 @@ impl Config {
             mics: vec![vector!(0., 0., 0.); 20],
             max_sources: 5,
             mbss: MbssConfig::default(),
-            messages: MsgConfig {
-                arrow_markers: false,
-                unit_sphere_ssl: false,
-                unit_sphere_points: true,
-                #[cfg(feature = "odas")]
-                unit_sphere_directions_odas: false,
-                source_audio: false,
-                spectrum_image: false,
-            },
             mbss_ssl_threashold: 5000.,
         })
     }
@@ -286,16 +276,6 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             )
             .description("maximal number of detected sources")
             .group(MBSS_GROUP),
-            Property::new("arrow_markers", self.messages.arrow_markers)
-            .group(MESSAGE_GROUP),
-            Property::new("unit_sphere_ssl", self.messages.unit_sphere_ssl)
-            .group(MESSAGE_GROUP),
-            Property::new("unit_sphere_points", self.messages.unit_sphere_points)
-            .group(MESSAGE_GROUP),
-            Property::new("source_audio", self.messages.source_audio)
-            .group(MESSAGE_GROUP),
-            Property::new("spectrum_image", self.messages.spectrum_image)
-            .group(MESSAGE_GROUP),
         ];
         props.extend(self.mics.iter().enumerate().flat_map(|(idx, mic)| {
             vec![
@@ -358,11 +338,6 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             "min_angle" => self.mbss.min_angle = value.as_float(name)?,
             "max_sources" => self.max_sources = value.as_int(name)? as u16,
             "mbss_ssl_threashold" => self.mbss_ssl_threashold = value.as_float(name)?,
-            "arrow_markers" => self.messages.arrow_markers = value.as_bool(name)?,
-            "unit_sphere_ssl" => self.messages.unit_sphere_ssl = value.as_bool(name)?,
-            "unit_sphere_points" => self.messages.unit_sphere_points = value.as_bool(name)?,
-            "source_audio" => self.messages.source_audio = value.as_bool(name)?,
-            "spectrum_image" => self.messages.spectrum_image = value.as_bool(name)?,
             other => return Err(format!("unexpected field: {other}").into()),
         }
         Ok(())

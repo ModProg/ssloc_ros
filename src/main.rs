@@ -3,10 +3,11 @@ use std::thread;
 use std::time::Duration;
 
 use crossbeam::channel::{bounded, TryRecvError};
+use extend::ext;
 use image::ImageOutputFormat;
 use lib::{for_format, AudioRecorder, Format};
 use nalgebra::UnitQuaternion;
-use rosrust::{ros_err, ros_info, ros_warn};
+use rosrust::{ros_err, ros_info, ros_warn, Message, Publisher};
 
 mod msgs {
     pub use rosrust_msg::geometry_msgs::*;
@@ -21,6 +22,13 @@ type Result<T = (), E = rosrust::error::Error> = std::result::Result<T, E>;
 mod config;
 use config::Config;
 use wav::BitDepth;
+
+#[ext]
+impl<T: Message> Publisher<T> {
+    fn has_subscribers(&self) -> bool {
+        self.subscriber_count() > 0
+    }
+}
 
 fn main() -> Result {
     env_logger::init();
@@ -161,7 +169,7 @@ fn main() -> Result {
                         continue;
                     }
                     let spectrum = mbss.analyze_spectrum(&audio);
-                    if config.messages.spectrum_image {
+                    if spectrums.subscriber_count() > 0 {
                         let mut data: Vec<u8> = Vec::new();
                         lib::spec_to_image(spectrum.view())
                             .write_to(&mut Cursor::new(&mut data), ImageOutputFormat::Png)
@@ -174,11 +182,11 @@ fn main() -> Result {
                             ros_err!("error sending spectrum image {e}");
                         }
                     }
-                    if config.messages.unit_sphere_ssl || config.messages.unit_sphere_points {
+                    if unit_sphere_ssl.has_subscribers() || unit_sphere_points.has_subscribers() {
                         let locations =
                             mbss.unit_sphere_spectrum(spectrum.view(), config.mbss_ssl_threashold);
 
-                        if config.messages.unit_sphere_ssl {
+                        if unit_sphere_ssl.has_subscribers() {
                             if let Err(e) = unit_sphere_ssl.send(msgs::UnitSslArray {
                                 header: header.clone(),
                                 sources: locations
@@ -194,7 +202,7 @@ fn main() -> Result {
                                 ros_err!("error sending unit sphere ssl {e}");
                             }
                         }
-                        if config.messages.unit_sphere_points {
+                        if unit_sphere_points.has_subscribers() {
                             if let Err(e) = unit_sphere_points.send(msgs::PointCloud2 {
                                 header: header.clone(),
                                 fields: vec![
@@ -293,21 +301,6 @@ fn main() -> Result {
 
     // Breaks when a shutdown signal is sent
     while rosrust::is_ok() {
-        // // Create string message
-        // let msg = rosrust_msg::std_msgs::String {
-        //     data: format!("hello world from rosrust {}", count),
-        // };
-
-        // Log event
-        // rosrust::ros_info!("Publishing: {:?}", msg);
-
-        // Send string message to topic via publisher
-
-        // if log_names {
-        //     rosrust::ros_info!("Subscriber names: {:?}",
-        // chatter_pub.subscriber_names()); }
-
-        // Sleep to maintain 10Hz rate
         rate.sleep();
     }
     ssloc.join().expect("ssloc thread should not panic")?;

@@ -668,6 +668,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "extend"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "311a6d2f1f9d60bff73d2c78a0af97ed27f79672f15c238192a5bbb64db56d00"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.15",
+]
+
+[[package]]
 name = "fastrand"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1592,6 +1603,7 @@ dependencies = [
 [[package]]
 name = "rosrust_dynamic_reconfigure"
 version = "0.1.0"
+source = "git+https://github.com/ModProg/rosrust_dynamic_reconfigure#36d3708c537096a61d5a48f34f74aa54dd949268"
 dependencies = [
  "crossbeam",
  "derive_more",
@@ -1851,6 +1863,7 @@ dependencies = [
  "crossbeam",
  "env_logger",
  "error-chain 0.12.4",
+ "extend",
  "image",
  "nalgebra",
  "rosrust",
