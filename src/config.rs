@@ -14,7 +14,7 @@ pub struct Device {
     pub name: String,
     pub description: String,
     pub channels: (u16, u16),
-    pub rate: (u16, u16),   
+    pub rate: (u16, u16),
     pub formats: Vec<Format>,
 }
 
@@ -44,6 +44,8 @@ pub struct MsgConfig {
 pub struct Config {
     pub format: Format,
     pub rate: u16,
+    pub use_audio_messages: bool,
+    pub audio_message_topic: String,
     pub device: Device,
     pub devices: Vec<Device>,
     pub localisation_frame: f64,
@@ -107,10 +109,12 @@ impl Config {
         Ok(Config {
             format: devices[0].formats[0],
             rate: devices[0].rate.0,
+            use_audio_messages: false,
+            audio_message_topic: String::new(),
             device: devices[0].clone(),
+            localisation_frame: 1.0,
             channels: devices[0].channels.0,
             devices,
-            localisation_frame: 1.0,
             mics: vec![vector!(0., 0., 0.); 20],
             max_sources: 5,
             mbss: MbssConfig::default(),
@@ -188,6 +192,8 @@ impl rosrust_dynamic_reconfigure::Config for Config {
 
     fn properties(&self) -> Vec<Property> {
         let mut props = vec![
+            Property::new("use_audio_messages", self.use_audio_messages).group(AUDIO_GROUP),
+            Property::new("audio_message_topic", &self.audio_message_topic).group(AUDIO_GROUP),
             Property::new_enum("device", &self.device.name, &self.devices).group(AUDIO_GROUP),
             Property::new_range("rate", self.rate, self.device.rate.0, self.device.rate.1)
                 .group(AUDIO_GROUP),
@@ -267,15 +273,9 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             )
             .description("minimal angle between two audio sources")
             .group(MBSS_GROUP),
-            Property::new_default_range(
-                "max_sources",
-                self.max_sources,
-                5,
-                1,
-                20,
-            )
-            .description("maximal number of detected sources")
-            .group(MBSS_GROUP),
+            Property::new_default_range("max_sources", self.max_sources, 5, 1, 20)
+                .description("maximal number of detected sources")
+                .group(MBSS_GROUP),
         ];
         props.extend(self.mics.iter().enumerate().flat_map(|(idx, mic)| {
             vec![
@@ -293,7 +293,9 @@ impl rosrust_dynamic_reconfigure::Config for Config {
     fn set(&mut self, name: &str, value: Value) -> rosrust::error::Result<()> {
         ros_info!("Setting: {name}={value}");
         match name {
-            "format" => self.format = value.as_string("format")?.parse()?,
+            "use_audio_messages" => self.use_audio_messages = value.as_bool(name)?,
+            "audio_message_topic" => self.audio_message_topic = value.as_string(name)?,
+            "format" => self.format = value.as_string(name)?.parse()?,
             "rate" => self.rate = value.as_int(name)? as u16,
             "device" => {
                 let value = value.as_string(name)?;
