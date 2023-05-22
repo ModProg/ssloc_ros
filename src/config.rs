@@ -126,7 +126,6 @@ impl Config {
 const AUDIO_GROUP: i32 = 100;
 const MIC_GROUP: i32 = 200;
 const MBSS_GROUP: i32 = 300;
-const MESSAGE_GROUP: i32 = 400;
 
 impl rosrust_dynamic_reconfigure::Config for Config {
     fn clean_up(&mut self) {
@@ -172,13 +171,6 @@ impl rosrust_dynamic_reconfigure::Config for Config {
                 parent: 0,
                 type_: GroupType::Tab,
             },
-            Group {
-                name: "Message Settings".into(),
-                state: false,
-                id: MESSAGE_GROUP,
-                parent: 0,
-                type_: GroupType::Tab,
-            },
         ];
         groups.extend((0..self.channels).map(|c| Group {
             name: format!("Mic {c}"),
@@ -186,6 +178,13 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             id: MIC_GROUP + 1 + c as i32,
             parent: MIC_GROUP,
             type_: GroupType::Tab,
+        }));
+        groups.extend((self.channels..self.mics.len() as u16).map(|c| Group {
+            name: format!("Mic {c}"),
+            state: false,
+            id: MIC_GROUP + 1 + c as i32,
+            parent: MIC_GROUP,
+            type_: GroupType::Hide,
         }));
         groups
     }

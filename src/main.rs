@@ -330,7 +330,7 @@ fn main() -> Result {
                         || unit_sphere_sst.has_subscribers()
                         || unit_sphere_sst_poses.has_subscribers()
                     {
-                        let sources = mbss.find_sources(spectrum.view(), max_sources);
+                        let sources:Vec<_> = mbss.find_sources(spectrum.view(), max_sources).into_iter().filter(|(.., strength)| *strength > config.mbss_ssl_threashold).collect();
 
                         if unit_sphere_sst.has_subscribers() {
                             log_error!(
