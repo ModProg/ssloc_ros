@@ -29,17 +29,6 @@ impl From<&Device> for Variant {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct MsgConfig {
-    pub arrow_markers: bool,
-    pub unit_sphere_ssl: bool,
-    pub unit_sphere_points: bool,
-    #[cfg(feature = "odas")]
-    unit_sphere_directions_odas: bool,
-    pub source_audio: bool,
-    pub spectrum_image: bool,
-}
-
 #[derive(Debug, Clone)]
 pub struct Config {
     pub format: Format,

@@ -12,6 +12,8 @@ use rosrust::{ros_err, ros_info, ros_warn, Message, Publisher};
 
 mod msgs {
     pub use rosrust_msg::geometry_msgs::*;
+                    #[cfg(feature = "odas_messages")]
+    pub use rosrust_msg::odas_ros::*;
     pub use rosrust_msg::sensor_msgs::*;
     pub use rosrust_msg::ssloc::*;
     pub use rosrust_msg::std_msgs::{ColorRGBA, Header};
@@ -95,7 +97,7 @@ fn main() -> Result {
                                             }
                                         }
                                     }
-                                    match audio_channel_send.send((msg.header.stamp, Audio::from_wav(Cursor::new(msg.data)))) {
+                                    match audio_channel_send.try_send((msg.header.stamp, Audio::from_wav(Cursor::new(msg.data)))) {
                                         Ok(_) => {}
                                         Err(_) => {
                                             ros_err!("channel disconnected, process must have exited");
@@ -183,7 +185,7 @@ fn main() -> Result {
                                         }
                                     }
                                 }
-                                match audio_channel_send.send((stamp, audio)) {
+                                match audio_channel_send.try_send((stamp, audio)) {
                                     Ok(_) => {}
                                     Err(_) => {
                                         ros_err!("channel disconnected, process must have exited");
@@ -210,6 +212,16 @@ fn main() -> Result {
             let unit_sphere_ssl_points =
                 rosrust::publish::<msgs::PointCloud2>("~unit_sphere_ssl_points", 20)?;
             let spectrums = rosrust::publish::<msgs::CompressedImage>("~spectrum/compressed", 20)?;
+            #[cfg(feature = "odas_messages")]
+            let odas_unit_sphere_sst = rosrust::publish::<msgs::OdasSst>("~odas/sst", 10)?;
+            #[cfg(feature = "odas_messages")]
+            let odas_unit_sphere_sst_poses =
+                odas_rosrust::publish::<msgs::PoseArray>("~odas/sst_poses", 10)?;
+            #[cfg(feature = "odas_messages")]
+            let odas_unit_sphere_ssl = rosrust::publish::<msgs::OdasSslArray>("~odas/ssl", 10)?;
+            #[cfg(feature = "odas_messages")]
+            let odas_unit_sphere_ssl_points =
+                rosrust::publish::<msgs::PointCloud2>("~odas/ssl_pcl2", 10)?;
 
             let mut config = updating_config.copy();
 
@@ -326,11 +338,19 @@ fn main() -> Result {
                         }
                     }
 
-                    if arrow_markers.has_subscribers()
+                    #[allow(unused_mut)]
+                    let mut sst_subbed = arrow_markers.has_subscribers()
                         || unit_sphere_sst.has_subscribers()
-                        || unit_sphere_sst_poses.has_subscribers()
-                    {
-                        let sources:Vec<_> = mbss.find_sources(spectrum.view(), max_sources).into_iter().filter(|(.., strength)| *strength > config.mbss_ssl_threashold).collect();
+                        || unit_sphere_sst_poses.has_subscribers();
+                    // #[cfg(feature = "odas_messages")]
+                    // sst_subbed |= odas_unit_sphere_sst.has_subscribers()
+                    //     || odas_unit_sphere_ssl_points.has_subscribers();
+                    if sst_subbed {
+                        let sources: Vec<_> = mbss
+                            .find_sources(spectrum.view(), max_sources)
+                            .into_iter()
+                            .filter(|(.., strength)| *strength > config.mbss_ssl_threashold)
+                            .collect();
 
                         if unit_sphere_sst.has_subscribers() {
                             log_error!(
@@ -354,29 +374,65 @@ fn main() -> Result {
                                 "error sending the unit sphere sst message: {err}"
                             );
                         }
-                        if unit_sphere_sst_poses.has_subscribers() {
+                        #[cfg(feature = "odas_messages")]
+                        if odas_unit_sphere_sst.has_subscribers() {
                             log_error!(
-                                unit_sphere_sst_poses.send(msgs::PoseArray {
+                                odas_unit_sphere_sst.send(msgs::OdasSstArray {
                                     header: header.clone(),
-                                    poses: sources
+                                    sources: sources
                                         .iter()
-                                        .map(|(az, el, _)| {
-                                            let quaternion =
-                                                lib::angles_to_quaternion(*az, *el).coords;
-                                            msgs::Pose {
-                                                orientation: msgs::Quaternion {
-                                                    x: quaternion.x,
-                                                    y: quaternion.y,
-                                                    z: quaternion.z,
-                                                    w: quaternion.w,
-                                                },
-                                                ..Default::default()
+                                        .enumerate()
+                                        .map(|(id, (az, el, _))| {
+                                            let position = lib::angles_to_unit_vec(*az, *el);
+                                            msgs::OdasSst {
+                                                id: id as i64,
+                                                activity: 0.,
+                                                x: position.x,
+                                                y: position.y,
+                                                z: position.z,
                                             }
                                         })
                                         .collect(),
                                 }),
                                 "error sending the unit sphere sst message: {err}"
                             );
+                        }
+                        #[allow(unused_mut)]
+                        let mut sst_poses_subbed = unit_sphere_sst_poses.has_subscribers();
+                        // #[cfg(feature = "odas_messages")]
+                        // sst_poses_subbed |= odas_unit_sphere_sst_poses.has_subscribers();
+                        if sst_poses_subbed {
+                            let poses = msgs::PoseArray {
+                                header: header.clone(),
+                                poses: sources
+                                    .iter()
+                                    .map(|(az, el, _)| {
+                                        let quaternion = lib::angles_to_quaternion(*az, *el).coords;
+                                        msgs::Pose {
+                                            orientation: msgs::Quaternion {
+                                                x: quaternion.x,
+                                                y: quaternion.y,
+                                                z: quaternion.z,
+                                                w: quaternion.w,
+                                            },
+                                            ..Default::default()
+                                        }
+                                    })
+                                    .collect(),
+                            };
+                            #[cfg(feature = "odas_messages")]
+                            if odas_unit_sphere_sst_poses.has_subscribers() {
+                                log_error!(
+                                    odas_unit_sphere_sst_poses.send(poses.clone()),
+                                    "error sending the odas unit sphere sst message: {err}"
+                                );
+                            }
+                            if unit_sphere_sst_poses.has_subscribers() {
+                                log_error!(
+                                    unit_sphere_sst_poses.send(poses),
+                                    "error sending the unit sphere sst message: {err}"
+                                );
+                            }
                         }
                         if arrow_markers.has_subscribers() {
                             for (idx, (az, el, _strength)) in sources.into_iter().enumerate() {
