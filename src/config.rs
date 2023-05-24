@@ -4,7 +4,7 @@ use std::iter;
 use alsa::device_name::{Hint, HintIter};
 use alsa::pcm::HwParams;
 use alsa::{Direction, PCM};
-use lib::{Format, MbssConfig, Position};
+use ssloc::{Format, MbssConfig, Position};
 use nalgebra::vector;
 use rosrust::ros_info;
 use rosrust_dynamic_reconfigure::{Group, GroupType, Property, Type, Value, Variant};
@@ -90,7 +90,7 @@ impl Config {
                         description: desc.unwrap_or_default(),
                         channels,
                         rate,
-                        formats: lib::Format::supported(&params).collect(),
+                        formats: ssloc::Format::supported(&params).collect(),
                     })
                 },
             )

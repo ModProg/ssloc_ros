@@ -1,5 +1,5 @@
 [package]
-name = "ssloc"
+name = "ssloc_ros"
 version = "0.1.0"
 edition = "2021"
 categories = []
@@ -7,29 +7,30 @@ description = ""
 keywords = []
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/ModProg/ssloc.ros"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+repository = "https://github.com/ModProg/ssloc_ros"
 
 [features]
+default = ["odas_messages"]
 odas_messages = []
 
 [dependencies]
-alsa = "0.7.0"
-anyhow = "1.0.71"
-crossbeam = { version = "0.8.2", features = ["crossbeam-channel"] }
-env_logger = "0.10"
-error-chain = "0.12.4"
-extend = "1.2.0"
-image = { version = "0.24.6", default-features = false, features = ["png"] }
-# lib = { package = "ssloc", path = "../../../ssloc/" }
-lib = { package = "ssloc", git = "https://github.com/ModProg/ssloc" }
-nalgebra = "0.32.2"
+alsa = "0.7"
+crossbeam = { version = "0.8", features = ["crossbeam-channel"] }
+env_logger = { version = "0.10", default-features = false }
+extend = "1.2"
+image = { version = "0.24", default-features = false, features = ["png"] }
+nalgebra = "0.32"
 rosrust = "0.9"
 #rosrust_dynamic_reconfigure = { version = "0.1.0", path = "../../../../../Development/Rust/rosrust_dynamic_reconfigure" }
 # rosrust_dynamic_reconfigure = { version = "0.1.0", path = "../../../rosrust_dynamic_reconfigure" }
 rosrust_dynamic_reconfigure.git = "https://github.com/ModProg/rosrust_dynamic_reconfigure"
 rosrust_msg = "0.1"
-wav = "1.0.0"
+
+[dependencies.ssloc]
+path = "../../../ssloc/"
+# git = "https://github.com/ModProg/ssloc"
+default-features = false
+features = ["realtime", "image"]
 
 [[package.metadata.release.pre-release-replacements]]
 file = "CHANGELOG.md"
