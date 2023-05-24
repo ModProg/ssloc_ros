@@ -12,14 +12,33 @@ use rosrust_dynamic_reconfigure::Updating;
 use ssloc::{for_format, Audio, AudioRecorder, Format};
 
 mod msgs {
-    pub use rosrust_msg::audio_common_msgs::{AudioData, AudioDataStamped, AudioInfo};
-    pub use rosrust_msg::geometry_msgs::{Point, Pose, PoseArray, Quaternion, Vector3};
     #[cfg(feature = "odas_messages")]
-    pub use rosrust_msg::odas_ros::{OdasSsl, OdasSslArrayStamped, OdasSst, OdasSstArrayStamped};
-    pub use rosrust_msg::sensor_msgs::{CompressedImage, PointCloud2, PointField};
-    pub use rosrust_msg::ssloc_ros_msgs::{UnitSsl, UnitSslArray, UnitSst, UnitSstArray};
-    pub use rosrust_msg::std_msgs::{ColorRGBA, Header};
-    pub use rosrust_msg::visualization_msgs::Marker;
+    rosrust::rosmsg_include! {
+        audio_common_msgs/AudioData, audio_common_msgs/AudioDataStamped, audio_common_msgs/AudioInfo,
+        geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
+        odas_ros/OdasSsl, odas_ros/OdasSslArrayStamped, odas_ros/OdasSst, odas_ros/OdasSstArrayStamped,
+        sensor_msgs/CompressedImage, sensor_msgs/PointCloud2, sensor_msgs/PointField,
+        ssloc_ros_msgs/UnitSsl, ssloc_ros_msgs/UnitSslArray, ssloc_ros_msgs/UnitSst, ssloc_ros_msgs/UnitSstArray,
+        std_msgs/ColorRGBA, std_msgs/Header,
+        visualization_msgs/Marker,
+    }
+    #[cfg(not(feature = "odas_messages"))]
+    rosrust::rosmsg_include! {
+        audio_common_msgs/AudioData, audio_common_msgs/AudioDataStamped, audio_common_msgs/AudioInfo,
+        geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
+        sensor_msgs/CompressedImage, sensor_msgs/PointCloud2, sensor_msgs/PointField,
+        ssloc_ros_msgs/UnitSsl, ssloc_ros_msgs/UnitSslArray, ssloc_ros_msgs/UnitSst, ssloc_ros_msgs/UnitSstArray,
+        std_msgs/ColorRGBA, std_msgs/Header,
+        visualization_msgs/Marker,
+    }
+    pub use audio_common_msgs::{AudioData, AudioDataStamped, AudioInfo};
+    pub use geometry_msgs::{Point, Pose, PoseArray, Quaternion, Vector3};
+    #[cfg(feature = "odas_messages")]
+    pub use odas_ros::{OdasSsl, OdasSslArrayStamped, OdasSst, OdasSstArrayStamped};
+    pub use sensor_msgs::{CompressedImage, PointCloud2, PointField};
+    pub use ssloc_ros_msgs::{UnitSsl, UnitSslArray, UnitSst, UnitSstArray};
+    pub use std_msgs::{ColorRGBA, Header};
+    pub use visualization_msgs::Marker;
 }
 
 type Result<T = (), E = rosrust::error::Error> = std::result::Result<T, E>;
