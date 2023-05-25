@@ -12,7 +12,7 @@ use rosrust_dynamic_reconfigure::Updating;
 use ssloc::{for_format, Audio, AudioRecorder, Format};
 
 mod msgs {
-    #[cfg(feature = "odas_messages")]
+    #[cfg(all(feature = "odas_messages", feature = "audio_common_msgs_stamped"))]
     rosrust::rosmsg_include! {
         audio_common_msgs/AudioData, audio_common_msgs/AudioDataStamped, audio_common_msgs/AudioInfo,
         geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
@@ -22,7 +22,26 @@ mod msgs {
         std_msgs/ColorRGBA, std_msgs/Header,
         visualization_msgs/Marker,
     }
-    #[cfg(not(feature = "odas_messages"))]
+    #[cfg(all(feature = "odas_messages", not(feature = "audio_common_msgs_stamped")))]
+    rosrust::rosmsg_include! {
+        audio_common_msgs/AudioData, audio_common_msgs/AudioInfo,
+        geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
+        odas_ros/OdasSsl, odas_ros/OdasSslArrayStamped, odas_ros/OdasSst, odas_ros/OdasSstArrayStamped,
+        sensor_msgs/CompressedImage, sensor_msgs/PointCloud2, sensor_msgs/PointField,
+        ssloc_ros_msgs/UnitSsl, ssloc_ros_msgs/UnitSslArray, ssloc_ros_msgs/UnitSst, ssloc_ros_msgs/UnitSstArray,
+        std_msgs/ColorRGBA, std_msgs/Header,
+        visualization_msgs/Marker,
+    }
+    #[cfg(not(any(feature = "odas_messages", feature = "audio_common_msgs_stamped")))]
+    rosrust::rosmsg_include! {
+        audio_common_msgs/AudioData, audio_common_msgs/AudioInfo,
+        geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
+        sensor_msgs/CompressedImage, sensor_msgs/PointCloud2, sensor_msgs/PointField,
+        ssloc_ros_msgs/UnitSsl, ssloc_ros_msgs/UnitSslArray, ssloc_ros_msgs/UnitSst, ssloc_ros_msgs/UnitSstArray,
+        std_msgs/ColorRGBA, std_msgs/Header,
+        visualization_msgs/Marker,
+    }
+    #[cfg(all(not(feature = "odas_messages"), feature = "audio_common_msgs_stamped"))]
     rosrust::rosmsg_include! {
         audio_common_msgs/AudioData, audio_common_msgs/AudioDataStamped, audio_common_msgs/AudioInfo,
         geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
@@ -31,7 +50,9 @@ mod msgs {
         std_msgs/ColorRGBA, std_msgs/Header,
         visualization_msgs/Marker,
     }
-    pub use audio_common_msgs::{AudioData, AudioDataStamped, AudioInfo};
+    #[cfg(feature = "audio_common_msgs_stamped")]
+    pub use audio_common_msgs::AudioDataStamped;
+    pub use audio_common_msgs::{AudioData, AudioInfo};
     pub use geometry_msgs::{Point, Pose, PoseArray, Quaternion, Vector3};
     #[cfg(feature = "odas_messages")]
     pub use odas_ros::{OdasSsl, OdasSslArrayStamped, OdasSst, OdasSstArrayStamped};
@@ -134,6 +155,7 @@ fn recorder(
 ) -> impl FnOnce() -> Result {
     move || {
         let audio_topic = rosrust::publish::<msgs::AudioData>("~audio", 10)?;
+        #[cfg(feature = "audio_common_msgs_stamped")]
         let audio_stamped_topic = rosrust::publish::<msgs::AudioDataStamped>("~audio_stamped", 10)?;
         let mut audio_info_topic = rosrust::publish::<msgs::AudioInfo>("~audio_info", 1)?;
         audio_info_topic.set_latching(true);
@@ -213,6 +235,7 @@ fn recorder(
 
                     while rosrust::is_ok() {
                         let stamp = rosrust::now();
+                        #[cfg(feature = "audio_common_msgs_stamped")]
                         let header = msgs::Header {
                             stamp,
                             frame_id: frame_id.clone(),
@@ -238,20 +261,24 @@ fn recorder(
                                 continue 'recorder;
                             }
                         };
-                        if audio_topic.has_subscribers() || audio_stamped_topic.has_subscribers() {
+                        let subbed = audio_topic.has_subscribers();
+                        #[cfg(feature = "audio_common_msgs_stamped")]
+                        let subbed = audio_stamped_topic.has_subscribers();
+                        if subbed {
                             // TODO consider supporting more than one output format.
                             let audio = msgs::AudioData {
                                 data: audio.to_interleaved().flat_map(f32::to_le_bytes).collect(),
                             };
-                            log_error!(
-                                audio_topic.send(audio.clone()),
-                                "error sending audio message {err}"
-                            );
+                            #[cfg(feature = "audio_common_msgs_stamped")]
                             log_error!(
                                 audio_stamped_topic.send(msgs::AudioDataStamped {
                                     header: header.clone(),
-                                    audio
+                                    audio: audio.clone()
                                 }),
+                                "error sending audio message {err}"
+                            );
+                            log_error!(
+                                audio_topic.send(audio),
                                 "error sending audio message {err}"
                             );
                         }
@@ -318,7 +345,7 @@ fn ssloc(
                 config.mics[..config.channels as usize]
                     .iter()
                     .filter(|(_, enabled)| *enabled)
-                    .collect(),
+                    .map(|(pos, _)| pos.clone()),
             );
             while rosrust::is_ok() {
                 let max_sources = {

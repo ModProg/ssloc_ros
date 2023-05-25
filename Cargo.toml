@@ -12,6 +12,7 @@ repository = "https://github.com/ModProg/ssloc_ros"
 [features]
 # default = ["odas_messages"]
 odas_messages = []
+audio_common_msgs_stamped = []
 
 [dependencies]
 alsa = "0.7"
