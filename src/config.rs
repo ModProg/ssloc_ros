@@ -4,10 +4,10 @@ use std::iter;
 use alsa::device_name::{Hint, HintIter};
 use alsa::pcm::HwParams;
 use alsa::{Direction, PCM};
-use ssloc::{Format, MbssConfig, Position};
 use nalgebra::vector;
 use rosrust::ros_info;
 use rosrust_dynamic_reconfigure::{Group, GroupType, Property, Type, Value, Variant};
+use ssloc::{Format, MbssConfig, Position};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Device {
@@ -39,7 +39,7 @@ pub struct Config {
     pub devices: Vec<Device>,
     pub localisation_frame: f64,
     pub channels: u16,
-    pub mics: Vec<Position>,
+    pub mics: Vec<(Position, bool)>,
     pub max_sources: u16,
     pub mbss: MbssConfig,
     pub mbss_ssl_threashold: f64,
@@ -104,7 +104,7 @@ impl Config {
             localisation_frame: 1.0,
             channels: devices[0].channels.0,
             devices,
-            mics: vec![vector!(0., 0., 0.); 20],
+            mics: vec![(vector!(0., 0., 0.), true); 20],
             max_sources: 5,
             mbss: MbssConfig::default(),
             mbss_ssl_threashold: 5000.,
@@ -265,16 +265,23 @@ impl rosrust_dynamic_reconfigure::Config for Config {
                 .description("maximal number of detected sources")
                 .group(MBSS_GROUP),
         ];
-        props.extend(self.mics.iter().enumerate().flat_map(|(idx, mic)| {
-            vec![
-                Property::new_range(format_args!("mic_{idx}_x"), mic.x, -2., 2.)
-                    .group(MIC_GROUP + 1 + idx as i32),
-                Property::new_range(format_args!("mic_{idx}_y"), mic.y, -2., 2.)
-                    .group(MIC_GROUP + 1 + idx as i32),
-                Property::new_range(format_args!("mic_{idx}_z"), mic.z, -2., 2.)
-                    .group(MIC_GROUP + 1 + idx as i32),
-            ]
-        }));
+        props.extend(
+            self.mics
+                .iter()
+                .enumerate()
+                .flat_map(|(idx, (mic, enabled))| {
+                    vec![
+                        Property::new_range(format_args!("mic_{idx}_x"), mic.x, -2., 2.)
+                            .group(MIC_GROUP + 1 + idx as i32),
+                        Property::new_range(format_args!("mic_{idx}_y"), mic.y, -2., 2.)
+                            .group(MIC_GROUP + 1 + idx as i32),
+                        Property::new_range(format_args!("mic_{idx}_z"), mic.z, -2., 2.)
+                            .group(MIC_GROUP + 1 + idx as i32),
+                        Property::new_default(format_args!("mic_{idx}_enabled"), *enabled, true)
+                            .group(MIC_GROUP + 1 + idx as i32),
+                    ]
+                }),
+        );
         props
     }
 
@@ -297,7 +304,6 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             "channels" => self.channels = value.as_int(name)? as u16,
             "localisation_frame" => self.localisation_frame = value.as_float(name)?,
             mic if mic.starts_with("mic_") => {
-                let value = value.as_float(name)?;
                 let (idx, coord) = mic
                     .strip_prefix("mic_")
                     .unwrap()
@@ -309,13 +315,16 @@ impl rosrust_dynamic_reconfigure::Config for Config {
                 if idx > self.mics.len() {
                     return Err(format!("invalid index for mic coordinate {idx}").into());
                 }
-                // self.mics
-                //     .extend((self.mics.len()..=idx).map(|_| Position::default()));
-                match coord {
-                    "x" => self.mics[idx].x = value,
-                    "y" => self.mics[idx].y = value,
-                    "z" => self.mics[idx].z = value,
-                    o => return Err(format!("unexpected coordinate: {o}").into()),
+                if coord == "enabled" {
+                    self.mics[idx].1 = value.as_bool(name)?;
+                } else {
+                    let value = value.as_float(name)?;
+                    match coord {
+                        "x" => self.mics[idx].0.x = value,
+                        "y" => self.mics[idx].0.y = value,
+                        "z" => self.mics[idx].0.z = value,
+                        o => return Err(format!("unexpected coordinate: {o}").into()),
+                    }
                 }
             }
             "pooling" => self.mbss.pooling = value.as_string(name)?.parse()?,

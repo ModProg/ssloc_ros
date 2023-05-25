@@ -314,9 +314,12 @@ fn ssloc(
         let mut config = updating_config.copy();
 
         'mbss: while rosrust::is_ok() {
-            let mbss = config
-                .mbss
-                .create(config.mics[..config.channels as usize].to_owned());
+            let mbss = config.mbss.create(
+                config.mics[..config.channels as usize]
+                    .iter()
+                    .filter(|(_, enabled)| *enabled)
+                    .collect(),
+            );
             while rosrust::is_ok() {
                 let max_sources = {
                     let update = updating_config.read();
@@ -329,7 +332,7 @@ fn ssloc(
                     }
                     update.max_sources.into()
                 };
-                let Ok((stamp, audio)) = audio_channel_recv.recv() else {
+                let Ok((stamp, mut audio)) = audio_channel_recv.recv() else {
                     ros_err!("channel disconnected, process must have exited");
                     return Ok(());
                 };
@@ -342,6 +345,7 @@ fn ssloc(
                     ros_info!("channels of recording missmatched, probably config was updated");
                     continue;
                 }
+                audio.retain_channels(|c| config.mics[c].1);
                 let spectrum = mbss.analyze_spectrum(&audio);
                 if spectrums.subscriber_count() > 0 {
                     let mut data: Vec<u8> = Vec::new();
@@ -386,6 +390,7 @@ fn ssloc(
                         );
                     }
                     if unit_sphere_ssl.has_subscribers() {
+                        #[cfg(feature = "odas_messages")]
                         log_error!(
                             odas_unit_sphere_ssl.send(msgs::OdasSslArrayStamped {
                                 header: header.clone(),
