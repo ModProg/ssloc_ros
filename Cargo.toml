@@ -10,7 +10,7 @@ readme = "README.md"
 repository = "https://github.com/ModProg/ssloc_ros"
 
 [features]
-default = ["odas_messages"]
+# default = ["odas_messages"]
 odas_messages = []
 
 [dependencies]
@@ -21,15 +21,11 @@ extend = "1.2"
 image = { version = "0.24", default-features = false, features = ["png"] }
 nalgebra = "0.32"
 rosrust = "0.9"
+rosrust_dynamic_reconfigure = "0.1"
 #rosrust_dynamic_reconfigure = { version = "0.1.0", path = "../../../../../Development/Rust/rosrust_dynamic_reconfigure" }
 # rosrust_dynamic_reconfigure = { version = "0.1.0", path = "../../../rosrust_dynamic_reconfigure" }
-rosrust_dynamic_reconfigure.git = "https://github.com/ModProg/rosrust_dynamic_reconfigure"
-
-[dependencies.ssloc]
-path = "../../../ssloc/"
-# git = "https://github.com/ModProg/ssloc"
-default-features = false
-features = ["realtime", "image"]
+# rosrust_dynamic_reconfigure.git = "https://github.com/ModProg/rosrust_dynamic_reconfigure"
+ssloc = {version = "0.1", default-features = false, features = ["realtime", "image"]}
 
 [[package.metadata.release.pre-release-replacements]]
 file = "CHANGELOG.md"

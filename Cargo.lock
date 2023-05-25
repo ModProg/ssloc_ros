@@ -1393,7 +1393,8 @@ dependencies = [
 [[package]]
 name = "rosrust_dynamic_reconfigure"
 version = "0.1.0"
-source = "git+https://github.com/ModProg/rosrust_dynamic_reconfigure#766bce671ffebe6dcaa38824e1f2a412a326b732"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c9fb5a910ff18165fd2dcfa0000542221ec53360f3b5d0cabf11bfb3e22b882"
 dependencies = [
  "crossbeam",
  "derive_more",
@@ -1616,6 +1617,8 @@ dependencies = [
 [[package]]
 name = "ssloc"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4290dea0979140a7d221ff73dc7e8e969d6d03df2567634a3a3b861ab93d3267"
 dependencies = [
  "alsa",
  "derive_more",
