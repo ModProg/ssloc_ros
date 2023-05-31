@@ -42,7 +42,8 @@ pub struct Config {
     pub mics: Vec<(Position, bool)>,
     pub max_sources: u16,
     pub mbss: MbssConfig,
-    pub mbss_ssl_threashold: f64,
+    pub mbss_ssl_threshold: f64,
+    pub tracking_decay: f64,
 }
 impl Config {
     pub fn init() -> rosrust::api::error::Result<Config> {
@@ -107,7 +108,8 @@ impl Config {
             mics: vec![(vector!(0., 0., 0.), true); 20],
             max_sources: 5,
             mbss: MbssConfig::default(),
-            mbss_ssl_threashold: 5000.,
+            mbss_ssl_threshold: 5000.,
+            tracking_decay: 0.5
         })
     }
 }
@@ -208,8 +210,8 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             .group(AUDIO_GROUP),
             Property::new_enum("mbss/pooling", "max", ["max", "sum"]).group(MBSS_GROUP),
             Property::new_default_range(
-                "mbss/ssl_threashold",
-                self.mbss_ssl_threashold,
+                "mbss/ssl_threshold",
+                self.mbss_ssl_threshold,
                 5_000.,
                 1.,
                 10_000.,
@@ -260,6 +262,15 @@ impl rosrust_dynamic_reconfigure::Config for Config {
                 0.5,
             )
             .description("minimal angle between two audio sources")
+            .group(MBSS_GROUP),
+            Property::new_default_range(
+                "mbss/tracking_decay",
+                self.tracking_decay,
+                0.5,
+                0.,
+                1.,
+            )
+            .description("factor sources from previous frames are reduced by per frame")
             .group(MBSS_GROUP),
             Property::new_default_range("mbss/max_sources", self.max_sources, 5, 1, 20)
                 .description("maximal number of detected sources")
@@ -336,7 +347,7 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             "mbss/alpha_res" => self.mbss.alpha_res = value.as_float(name)?,
             "mbss/min_angle" => self.mbss.min_angle = value.as_float(name)?,
             "mbss/max_sources" => self.max_sources = value.as_int(name)? as u16,
-            "mbss/ssl_threashold" => self.mbss_ssl_threashold = value.as_float(name)?,
+            "mbss/ssl_threshold" => self.mbss_ssl_threshold = value.as_float(name)?,
             other => return Err(format!("unexpected field: {other}").into()),
         }
         Ok(())

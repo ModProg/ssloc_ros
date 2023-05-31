@@ -7,7 +7,7 @@ recording:
   format: S32
 mbss:
   pooling: max # "max" or "sum"
-  ssl_threashold: 5000 # 1..10000
+  ssl_threshold: 5000 # 1..10000
   azimuth:
     min: -3.141592653
     max: 3.141592653

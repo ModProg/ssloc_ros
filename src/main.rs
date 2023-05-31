@@ -1,18 +1,27 @@
 use std::io::Cursor;
-use std::thread;
+use std::sync::atomic::AtomicI64;
+use std::sync::{atomic, Arc};
 use std::time::Duration;
+use std::{mem, thread};
 
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use extend::ext;
 use image::ImageOutputFormat;
+use itertools::Itertools;
 use nalgebra::UnitQuaternion;
+use parking_lot::Mutex;
 use rosrust::error::ResultExt;
 use rosrust::{ros_err, ros_info, ros_warn, Message, Publisher, Time};
 use rosrust_dynamic_reconfigure::Updating;
-use ssloc::{for_format, Audio, AudioRecorder, Format};
+use ssloc::mbss::angular_distance;
+use ssloc::{for_format, Audio, AudioRecorder, Format, F};
 
+#[cfg(feature = "builtin-msgs")]
+mod msgs;
+
+#[cfg(not(feature = "builtin-msgs"))]
 mod msgs {
-    #[cfg(all(feature = "odas_messages", feature = "audio_common_msgs_stamped"))]
+    #[cfg(all(feature = "odas-msgs", feature = "audio_common_msgs-stamped"))]
     rosrust::rosmsg_include! {
         audio_common_msgs/AudioData, audio_common_msgs/AudioDataStamped, audio_common_msgs/AudioInfo,
         geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
@@ -22,7 +31,7 @@ mod msgs {
         std_msgs/ColorRGBA, std_msgs/Header,
         visualization_msgs/Marker,
     }
-    #[cfg(all(feature = "odas_messages", not(feature = "audio_common_msgs_stamped")))]
+    #[cfg(all(feature = "odas-msgs", not(feature = "audio_common_msgs-stamped")))]
     rosrust::rosmsg_include! {
         audio_common_msgs/AudioData, audio_common_msgs/AudioInfo,
         geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
@@ -32,7 +41,7 @@ mod msgs {
         std_msgs/ColorRGBA, std_msgs/Header,
         visualization_msgs/Marker,
     }
-    #[cfg(not(any(feature = "odas_messages", feature = "audio_common_msgs_stamped")))]
+    #[cfg(not(any(feature = "odas-msgs", feature = "audio_common_msgs-stamped")))]
     rosrust::rosmsg_include! {
         audio_common_msgs/AudioData, audio_common_msgs/AudioInfo,
         geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
@@ -41,7 +50,7 @@ mod msgs {
         std_msgs/ColorRGBA, std_msgs/Header,
         visualization_msgs/Marker,
     }
-    #[cfg(all(not(feature = "odas_messages"), feature = "audio_common_msgs_stamped"))]
+    #[cfg(all(not(feature = "odas-msgs"), feature = "audio_common_msgs-stamped"))]
     rosrust::rosmsg_include! {
         audio_common_msgs/AudioData, audio_common_msgs/AudioDataStamped, audio_common_msgs/AudioInfo,
         geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
@@ -50,11 +59,11 @@ mod msgs {
         std_msgs/ColorRGBA, std_msgs/Header,
         visualization_msgs/Marker,
     }
-    #[cfg(feature = "audio_common_msgs_stamped")]
+    #[cfg(feature = "audio_common_msgs-stamped")]
     pub use audio_common_msgs::AudioDataStamped;
     pub use audio_common_msgs::{AudioData, AudioInfo};
     pub use geometry_msgs::{Point, Pose, PoseArray, Quaternion, Vector3};
-    #[cfg(feature = "odas_messages")]
+    #[cfg(feature = "odas-msgs")]
     pub use odas_ros::{OdasSsl, OdasSslArrayStamped, OdasSst, OdasSstArrayStamped};
     pub use sensor_msgs::{CompressedImage, PointCloud2, PointField};
     pub use ssloc_ros_msgs::{UnitSsl, UnitSslArray, UnitSst, UnitSstArray};
@@ -149,14 +158,13 @@ fn main() -> Result {
 
 fn recorder(
     updating_config: Updating<Config>,
-    #[cfg_attr(not(eature = "audio_common_msgs_stamped"), allow(unused))]
-    frame_id: String,
+    #[cfg_attr(not(eature = "audio_common_msgs-stamped"), allow(unused))] frame_id: String,
     audio_channel_send: Sender<(Time, Audio)>,
     audio_channel_recv: Receiver<(Time, Audio)>,
 ) -> impl FnOnce() -> Result {
     move || {
         let audio_topic = rosrust::publish::<msgs::AudioData>("~audio", 10)?;
-        #[cfg(feature = "audio_common_msgs_stamped")]
+        #[cfg(feature = "audio_common_msgs-stamped")]
         let audio_stamped_topic = rosrust::publish::<msgs::AudioDataStamped>("~audio_stamped", 10)?;
         let mut audio_info_topic = rosrust::publish::<msgs::AudioInfo>("~audio_info", 1)?;
         audio_info_topic.set_latching(true);
@@ -236,7 +244,7 @@ fn recorder(
 
                     while rosrust::is_ok() {
                         let stamp = rosrust::now();
-                        #[cfg(feature = "audio_common_msgs_stamped")]
+                        #[cfg(feature = "audio_common_msgs-stamped")]
                         let header = msgs::Header {
                             stamp,
                             frame_id: frame_id.clone(),
@@ -262,15 +270,16 @@ fn recorder(
                                 continue 'recorder;
                             }
                         };
+                        #[cfg_attr(feature = "audio_common_msgs-stamped", allow(unused))]
                         let subbed = audio_topic.has_subscribers();
-                        #[cfg(feature = "audio_common_msgs_stamped")]
+                        #[cfg(feature = "audio_common_msgs-stamped")]
                         let subbed = audio_stamped_topic.has_subscribers();
                         if subbed {
                             // TODO consider supporting more than one output format.
                             let audio = msgs::AudioData {
                                 data: audio.to_interleaved().flat_map(f32::to_le_bytes).collect(),
                             };
-                            #[cfg(feature = "audio_common_msgs_stamped")]
+                            #[cfg(feature = "audio_common_msgs-stamped")]
                             log_error!(
                                 audio_stamped_topic.send(msgs::AudioDataStamped {
                                     header: header.clone(),
@@ -313,6 +322,15 @@ fn recorder(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Track {
+    az: F,
+    el: F,
+    stamp: rosrust::Time,
+    intensity: F,
+    id: i64,
+}
+
 fn ssloc(
     updating_config: Updating<Config>,
     frame_id: String,
@@ -328,28 +346,34 @@ fn ssloc(
             rosrust::publish::<msgs::PointCloud2>("~unit_sphere_ssl_points", 20)?;
         let spectrums = rosrust::publish::<msgs::CompressedImage>("~spectrum/compressed", 20)?;
 
-        #[cfg(feature = "odas_messages")]
+        #[cfg(feature = "odas-msgs")]
         let odas_unit_sphere_sst = rosrust::publish::<msgs::OdasSstArrayStamped>("~odas/sst", 10)?;
-        #[cfg(feature = "odas_messages")]
+        #[cfg(feature = "odas-msgs")]
         let odas_unit_sphere_sst_poses =
             rosrust::publish::<msgs::PoseArray>("~odas/sst_poses", 10)?;
-        #[cfg(feature = "odas_messages")]
+        #[cfg(feature = "odas-msgs")]
         let odas_unit_sphere_ssl = rosrust::publish::<msgs::OdasSslArrayStamped>("~odas/ssl", 10)?;
-        #[cfg(feature = "odas_messages")]
+        #[cfg(feature = "odas-msgs")]
         let odas_unit_sphere_ssl_points =
             rosrust::publish::<msgs::PointCloud2>("~odas/ssl_pcl2", 10)?;
 
         let mut config = updating_config.copy();
+
+        let last_tracks: Vec<Track> = Vec::new();
+        let last_tracks = Arc::new(Mutex::new(last_tracks));
+
+        // continuiously increases and will wrap at some point
+        let track_index = AtomicI64::default();
 
         'mbss: while rosrust::is_ok() {
             let mbss = config.mbss.create(
                 config.mics[..config.channels as usize]
                     .iter()
                     .filter(|(_, enabled)| *enabled)
-                    .map(|(pos, _)| pos.clone()),
+                    .map(|(pos, _)| *pos),
             );
             while rosrust::is_ok() {
-                let max_sources = {
+                {
                     let update = updating_config.read();
                     if update.channels != config.channels
                         || update.mics != config.mics
@@ -358,7 +382,9 @@ fn ssloc(
                         config = update.clone();
                         continue 'mbss;
                     }
-                    update.max_sources.into()
+                    config.max_sources = update.max_sources;
+                    config.tracking_decay = update.tracking_decay;
+                    config.mbss_ssl_threshold = update.mbss_ssl_threshold;
                 };
                 let Ok((stamp, mut audio)) = audio_channel_recv.recv() else {
                     ros_err!("channel disconnected, process must have exited");
@@ -392,13 +418,13 @@ fn ssloc(
 
                 let subbed =
                     unit_sphere_ssl.has_subscribers() || unit_sphere_ssl_points.has_subscribers();
-                #[cfg(feature = "odas_messages")]
+                #[cfg(feature = "odas-msgs")]
                 let subbed = subbed
                     || odas_unit_sphere_ssl.has_subscribers()
                     || odas_unit_sphere_ssl_points.has_subscribers();
                 if subbed {
                     let locations =
-                        mbss.unit_sphere_spectrum(spectrum.view(), config.mbss_ssl_threashold);
+                        mbss.unit_sphere_spectrum(spectrum.view(), config.mbss_ssl_threshold);
 
                     if unit_sphere_ssl.has_subscribers() {
                         log_error!(
@@ -418,7 +444,7 @@ fn ssloc(
                         );
                     }
                     if unit_sphere_ssl.has_subscribers() {
-                        #[cfg(feature = "odas_messages")]
+                        #[cfg(feature = "odas-msgs")]
                         log_error!(
                             odas_unit_sphere_ssl.send(msgs::OdasSslArrayStamped {
                                 header: header.clone(),
@@ -480,7 +506,7 @@ fn ssloc(
                             row_step: locations.len() as u32,
                             is_dense: true,
                         };
-                        #[cfg(feature = "odas_messages")]
+                        #[cfg(feature = "odas-msgs")]
                         log_error!(
                             odas_unit_sphere_ssl_points.send(msg.clone()),
                             "error sending unit sphere ssl {err}"
@@ -495,30 +521,102 @@ fn ssloc(
                 let subbed = arrow_markers.has_subscribers()
                     || unit_sphere_sst.has_subscribers()
                     || unit_sphere_sst_poses.has_subscribers();
-                #[cfg(feature = "odas_messages")]
+                #[cfg(feature = "odas-msgs")]
                 let subbed = subbed
                     || odas_unit_sphere_sst.has_subscribers()
                     || odas_unit_sphere_ssl_points.has_subscribers();
 
                 if subbed {
-                    let sources: Vec<_> = mbss
-                        .find_sources(spectrum.view(), max_sources)
-                        .into_iter()
-                        .filter(|(.., strength)| *strength > config.mbss_ssl_threashold)
-                        .collect();
+                    let mut last_tracks = last_tracks
+                        .try_lock_for(Duration::from_secs(1))
+                        .expect("should not deadlock");
+                    if last_tracks.iter().any(|track| track.stamp > stamp) {
+                        ros_info!("skipping publish of out of order poses");
+                        continue;
+                    }
 
+                    let mut new_tracks = Vec::new();
+
+                    for (az, el, intensity) in mbss
+                        .find_sources(spectrum.view(), config.max_sources.into())
+                        .into_iter()
+                        .filter(|(.., strength)| *strength > config.mbss_ssl_threshold)
+                    {
+                        let neighboors: Vec<_> = last_tracks
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, track)| {
+                                angular_distance(track.az, track.el, az, el) < config.mbss.min_angle
+                            })
+                            .collect();
+                        match neighboors.as_slice() {
+                            [] => new_tracks.push(Track {
+                                az,
+                                el,
+                                stamp,
+                                intensity,
+                                id: track_index.fetch_add(1, atomic::Ordering::Relaxed),
+                            }),
+                            [(i, neighboor)] => {
+                                let i = *i;
+                                new_tracks.push(Track {
+                                    az,
+                                    el,
+                                    stamp,
+                                    intensity: neighboor.intensity.max(intensity),
+                                    id: neighboor.id,
+                                });
+                                last_tracks.remove(i);
+                            }
+                            multiple => {
+                                // first one has highest intensity
+                                let neighboor = multiple[0].1;
+                                new_tracks.push(Track {
+                                    az,
+                                    el,
+                                    stamp,
+                                    intensity: neighboor.intensity.max(intensity),
+                                    id: neighboor.id,
+                                });
+                                let idxs = multiple.iter().rev().map(|(i, _)| *i).collect_vec();
+                                for i in idxs {
+                                    last_tracks.remove(i);
+                                }
+                            }
+                        }
+                    }
+                    let mut sources: Vec<_> = new_tracks
+                        .into_iter()
+                        .chain(
+                            mem::take::<Vec<_>>(last_tracks.as_mut())
+                                .into_iter()
+                                .map(|mut track| {
+                                    track.intensity *= config.tracking_decay;
+                                    track
+                                })
+                                .filter(|track| track.intensity > 0.),
+                        )
+                        .collect();
+                    sources.sort_unstable_by(|a, b| a.intensity.total_cmp(&b.intensity));
+                    sources = if sources.len() > config.max_sources.into() {
+                        sources[0..config.max_sources.into()].to_vec()
+                    } else {
+                        sources
+                    };
+                    *last_tracks = sources.clone();
+                    drop(last_tracks);
                     if unit_sphere_sst.has_subscribers() {
                         log_error!(
                             unit_sphere_sst.send(msgs::UnitSstArray {
                                 header: header.clone(),
                                 sources: sources
                                     .iter()
-                                    .enumerate()
-                                    .map(|(id, (az, el, _))| {
-                                        let position = ssloc::angles_to_unit_vec(*az, *el);
+                                    .map(|track| {
+                                        let position =
+                                            ssloc::angles_to_unit_vec(track.az, track.el);
                                         msgs::UnitSst {
-                                            id: id as i64,
-                                            activity: 0.,
+                                            id: track.id,
+                                            activity: track.intensity,
                                             x: position.x,
                                             y: position.y,
                                             z: position.z,
@@ -529,19 +627,19 @@ fn ssloc(
                             "error sending the unit sphere sst message: {err}"
                         );
                     }
-                    #[cfg(feature = "odas_messages")]
+                    #[cfg(feature = "odas-msgs")]
                     if odas_unit_sphere_sst.has_subscribers() {
                         log_error!(
                             odas_unit_sphere_sst.send(msgs::OdasSstArrayStamped {
                                 header: header.clone(),
                                 sources: sources
                                     .iter()
-                                    .enumerate()
-                                    .map(|(id, (az, el, _))| {
-                                        let position = ssloc::angles_to_unit_vec(*az, *el);
+                                    .map(|track| {
+                                        let position =
+                                            ssloc::angles_to_unit_vec(track.az, track.el);
                                         msgs::OdasSst {
-                                            id: id as i64,
-                                            activity: 0.,
+                                            id: track.id,
+                                            activity: track.intensity,
                                             x: position.x,
                                             y: position.y,
                                             z: position.z,
@@ -554,7 +652,7 @@ fn ssloc(
                     }
 
                     let sst_poses_subbed = unit_sphere_sst_poses.has_subscribers();
-                    #[cfg(feature = "odas_messages")]
+                    #[cfg(feature = "odas-msgs")]
                     let sst_poses_subbed =
                         sst_poses_subbed || odas_unit_sphere_sst_poses.has_subscribers();
 
@@ -563,8 +661,9 @@ fn ssloc(
                             header: header.clone(),
                             poses: sources
                                 .iter()
-                                .map(|(az, el, _)| {
-                                    let quaternion = ssloc::angles_to_quaternion(*az, *el).coords;
+                                .map(|track| {
+                                    let quaternion =
+                                        ssloc::angles_to_quaternion(track.az, track.el).coords;
                                     msgs::Pose {
                                         orientation: msgs::Quaternion {
                                             x: quaternion.x,
@@ -577,7 +676,7 @@ fn ssloc(
                                 })
                                 .collect(),
                         };
-                        #[cfg(feature = "odas_messages")]
+                        #[cfg(feature = "odas-msgs")]
                         if odas_unit_sphere_sst_poses.has_subscribers() {
                             log_error!(
                                 odas_unit_sphere_sst_poses.send(poses.clone()),
@@ -592,8 +691,9 @@ fn ssloc(
                         }
                     }
                     if arrow_markers.has_subscribers() {
-                        for (idx, (az, el, _strength)) in sources.into_iter().enumerate() {
-                            let rotation = UnitQuaternion::from_euler_angles(0., -el, az).coords;
+                        for (idx, track) in sources.into_iter().enumerate() {
+                            let rotation =
+                                UnitQuaternion::from_euler_angles(0., -track.el, track.az).coords;
                             log_error!(
                                 arrow_markers.send(msgs::Marker {
                                     header: header.clone(),
