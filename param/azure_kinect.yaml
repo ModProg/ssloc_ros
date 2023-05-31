@@ -1,0 +1,36 @@
+# Settings for an Azure Kinect
+recording:
+  channels: 7
+  device: dsnoop:CARD=Array,DEV=0
+  format: S32
+  rate: 48000
+mbss/elevation/min: 0.0
+mic:
+  "0":
+    x: 0.0
+    y: 0.0
+    z: 0.0
+  "1":
+    x: 0.0
+    y: 0.0
+    z: 0.0
+  "2":
+    x: 0.02
+    y: -0.0346
+    z: 0.0
+  "3":
+    x: -0.02
+    y: -0.0346
+    z: 0.0
+  "4":
+    x: -0.04
+    y: 0.0
+    z: 0.0
+  "5":
+    x: -0.02
+    y: 0.0346
+    z: 0.0
+  "6":
+    x: 0.02
+    y: 0.0346
+    z: 0.0

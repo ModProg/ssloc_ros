@@ -1,5 +1,7 @@
 <launch>
     <node name="ssloc" pkg="ssloc_ros" type="ssloc_ros">
         <param name="frame_id" value="map" />
+        <!-- see param/defaults.yaml for all availible parameters and their default values -->
+        <!-- <rosparam command="load" file="$(find ssloc_ros)/param/defaults.yaml" /> -->
     </node>
 </launch>

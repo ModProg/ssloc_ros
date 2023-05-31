@@ -1,0 +1,34 @@
+recording:
+  use_audio_messages: false
+  audio_message_topic: ""
+  device: default
+  channels: 2
+  rate: 48000
+  format: S32
+mbss:
+  pooling: max # "max" or "sum"
+  ssl_threashold: 5000 # 1..10000
+  azimuth:
+    min: -3.141592653
+    max: 3.141592653
+  elevation:
+    min: -3.141592653
+    max: 3.141592653
+  grid_res: 0.02 # 0.01..0.5
+  alpha_res: 0.02 # 0.01..0.5
+  # minimal angle between two audio sources
+  min_angle: 0.1 # 0.01..0.5
+  # maximal number of detected sources
+  max_sources: 5 # 1..20
+mic:
+  "0":
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    # should this channel be used for ssloc
+    enabled: true
+  "1":
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    enabled: true

@@ -1,6 +1,6 @@
 <launch>
     <node name="ssloc" pkg="ssloc_ros" type="ssloc_ros">
         <param name="frame_id" value="map"/>
-        <rosparam command="load" file="$(find ssloc_ros)/param/kinect.yaml" />
+        <rosparam command="load" file="$(find ssloc_ros)/param/azure_kinect.yaml" />
     </node>
 </launch>

@@ -619,7 +619,6 @@ fn ssloc(
                                         ..Default::default()
                                     },
                                     scale: msgs::Vector3 {
-                                        // x: (strength / 2000.).clamp(0.2, 2.),
                                         x: 1.,
                                         y: 0.2,
                                         z: 0.2,

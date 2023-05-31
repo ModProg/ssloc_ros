@@ -180,35 +180,35 @@ impl rosrust_dynamic_reconfigure::Config for Config {
 
     fn properties(&self) -> Vec<Property> {
         let mut props = vec![
-            Property::new("use_audio_messages", self.use_audio_messages).group(AUDIO_GROUP),
-            Property::new("audio_message_topic", &self.audio_message_topic).group(AUDIO_GROUP),
-            Property::new_enum("device", &self.device.name, &self.devices).group(AUDIO_GROUP),
-            Property::new_range("rate", self.rate, self.device.rate.0, self.device.rate.1)
+            Property::new("recording/use_audio_messages", self.use_audio_messages).group(AUDIO_GROUP),
+            Property::new("recording/audio_message_topic", &self.audio_message_topic).group(AUDIO_GROUP),
+            Property::new_enum("recording/device", &self.device.name, &self.devices).group(AUDIO_GROUP),
+            Property::new_range("recording/rate", self.rate, self.device.rate.0, self.device.rate.1)
                 .group(AUDIO_GROUP),
             Property::new_enum(
-                "format",
+                "recording/format",
                 self.format.to_string(),
                 self.device.formats.iter().map(ToString::to_string),
             )
             .group(AUDIO_GROUP),
             Property::new_default_range(
-                "localisation_frame",
+                "recording/frame_length",
                 self.localisation_frame,
-                1.0,
-                0.1,
+                0.3,
+                0.05,
                 10.,
             )
             .group(AUDIO_GROUP),
             Property::new_range(
-                "channels",
+                "recording/channels",
                 self.channels,
                 self.device.channels.0,
                 self.device.channels.1,
             )
             .group(AUDIO_GROUP),
-            Property::new_enum("pooling", "max", ["max", "sum"]).group(MBSS_GROUP),
+            Property::new_enum("mbss/pooling", "max", ["max", "sum"]).group(MBSS_GROUP),
             Property::new_default_range(
-                "mbss_ssl_threashold",
+                "mbss/ssl_threashold",
                 self.mbss_ssl_threashold,
                 5_000.,
                 1.,
@@ -216,12 +216,12 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             )
             .group(MBSS_GROUP),
             // TODO spectrum_method
-            Property::new_default_range("azimuth_min", self.mbss.azimuth_range.0, -PI, -PI, PI)
+            Property::new_default_range("mbss/azimuth/min", self.mbss.azimuth_range.0, -PI, -PI, PI)
                 .group(MBSS_GROUP),
-            Property::new_default_range("azimuth_max", self.mbss.azimuth_range.1, PI, -PI, PI)
+            Property::new_default_range("mbss/azimuth/max", self.mbss.azimuth_range.1, PI, -PI, PI)
                 .group(MBSS_GROUP),
             Property::new_default_range(
-                "elevation_min",
+                "mbss/elevation/min",
                 self.mbss.elevation_range.0,
                 -PI / 2.,
                 -PI / 2.,
@@ -229,7 +229,7 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             )
             .group(MBSS_GROUP),
             Property::new_default_range(
-                "elevation_max",
+                "mbss/elevation/max",
                 self.mbss.elevation_range.1,
                 PI / 2.,
                 -PI / 2.,
@@ -237,31 +237,31 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             )
             .group(MBSS_GROUP),
             Property::new_default_range(
-                "grid_res",
+                "mbss/grid_res",
                 self.mbss.grid_res,
-                1f64.to_radians(),
-                0.1f64.to_radians(),
-                10f64.to_radians(),
+                0.02,
+                0.01,
+                0.5,
             )
             .group(MBSS_GROUP),
             Property::new_default_range(
-                "alpha_res",
+                "mbss/alpha_res",
                 self.mbss.alpha_res,
-                1f64.to_radians(),
-                0.1f64.to_radians(),
-                10f64.to_radians(),
+                0.02,
+                0.01,
+                0.5,
             )
             .group(MBSS_GROUP),
             Property::new_default_range(
-                "min_angle",
+                "mbss/min_angle",
                 self.mbss.min_angle,
-                5f64.to_radians(),
-                1f64.to_radians(),
-                20f64.to_radians(),
+                0.1,
+                0.01,
+                0.5,
             )
             .description("minimal angle between two audio sources")
             .group(MBSS_GROUP),
-            Property::new_default_range("max_sources", self.max_sources, 5, 1, 20)
+            Property::new_default_range("mbss/max_sources", self.max_sources, 5, 1, 20)
                 .description("maximal number of detected sources")
                 .group(MBSS_GROUP),
         ];
@@ -271,13 +271,13 @@ impl rosrust_dynamic_reconfigure::Config for Config {
                 .enumerate()
                 .flat_map(|(idx, (mic, enabled))| {
                     vec![
-                        Property::new_range(format_args!("mic_{idx}_x"), mic.x, -2., 2.)
+                        Property::new_range(format_args!("mic/{idx}/x"), mic.x, -2., 2.)
                             .group(MIC_GROUP + 1 + idx as i32),
-                        Property::new_range(format_args!("mic_{idx}_y"), mic.y, -2., 2.)
+                        Property::new_range(format_args!("mic/{idx}/y"), mic.y, -2., 2.)
                             .group(MIC_GROUP + 1 + idx as i32),
-                        Property::new_range(format_args!("mic_{idx}_z"), mic.z, -2., 2.)
+                        Property::new_range(format_args!("mic/{idx}/z"), mic.z, -2., 2.)
                             .group(MIC_GROUP + 1 + idx as i32),
-                        Property::new_default(format_args!("mic_{idx}_enabled"), *enabled, true)
+                        Property::new_default(format_args!("mic/{idx}/enabled"), *enabled, true)
                             .group(MIC_GROUP + 1 + idx as i32),
                     ]
                 }),
@@ -288,11 +288,9 @@ impl rosrust_dynamic_reconfigure::Config for Config {
     fn set(&mut self, name: &str, value: Value) -> rosrust::error::Result<()> {
         ros_info!("Setting: {name}={value}");
         match name {
-            "use_audio_messages" => self.use_audio_messages = value.as_bool(name)?,
-            "audio_message_topic" => self.audio_message_topic = value.as_string(name)?,
-            "format" => self.format = value.as_string(name)?.parse()?,
-            "rate" => self.rate = value.as_int(name)? as u16,
-            "device" => {
+            "recording/use_audio_messages" => self.use_audio_messages = value.as_bool(name)?,
+            "recording/audio_message_topic" => self.audio_message_topic = value.as_string(name)?,
+            "recording/device" => {
                 let value = value.as_string(name)?;
                 self.device = self
                     .devices
@@ -301,13 +299,15 @@ impl rosrust_dynamic_reconfigure::Config for Config {
                     .ok_or_else(|| format!("unknown device {value}"))?
                     .clone();
             }
-            "channels" => self.channels = value.as_int(name)? as u16,
-            "localisation_frame" => self.localisation_frame = value.as_float(name)?,
-            mic if mic.starts_with("mic_") => {
+            "recording/rate" => self.rate = value.as_int(name)? as u16,
+            "recording/format" => self.format = value.as_string(name)?.parse()?,
+            "recording/frame_length" => self.localisation_frame = value.as_float(name)?,
+            "recording/channels" => self.channels = value.as_int(name)? as u16,
+            mic if mic.starts_with("mic/") => {
                 let (idx, coord) = mic
-                    .strip_prefix("mic_")
+                    .strip_prefix("mic/")
                     .unwrap()
-                    .split_once('_')
+                    .split_once('/')
                     .ok_or_else(|| format!("invalid format for mic coordinate {mic}"))?;
                 let idx: usize = idx
                     .parse()
@@ -327,16 +327,16 @@ impl rosrust_dynamic_reconfigure::Config for Config {
                     }
                 }
             }
-            "pooling" => self.mbss.pooling = value.as_string(name)?.parse()?,
-            "azimuth_min" => self.mbss.azimuth_range.0 = value.as_float(name)?,
-            "azimuth_max" => self.mbss.azimuth_range.1 = value.as_float(name)?,
-            "elevation_min" => self.mbss.elevation_range.0 = value.as_float(name)?,
-            "elevation_max" => self.mbss.elevation_range.1 = value.as_float(name)?,
-            "grid_res" => self.mbss.grid_res = value.as_float(name)?,
-            "alpha_res" => self.mbss.alpha_res = value.as_float(name)?,
-            "min_angle" => self.mbss.min_angle = value.as_float(name)?,
-            "max_sources" => self.max_sources = value.as_int(name)? as u16,
-            "mbss_ssl_threashold" => self.mbss_ssl_threashold = value.as_float(name)?,
+            "mbss/pooling" => self.mbss.pooling = value.as_string(name)?.parse()?,
+            "mbss/azimuth/min" => self.mbss.azimuth_range.0 = value.as_float(name)?,
+            "mbss/azimuth/max" => self.mbss.azimuth_range.1 = value.as_float(name)?,
+            "mbss/elevation/min" => self.mbss.elevation_range.0 = value.as_float(name)?,
+            "mbss/elevation/max" => self.mbss.elevation_range.1 = value.as_float(name)?,
+            "mbss/grid_res" => self.mbss.grid_res = value.as_float(name)?,
+            "mbss/alpha_res" => self.mbss.alpha_res = value.as_float(name)?,
+            "mbss/min_angle" => self.mbss.min_angle = value.as_float(name)?,
+            "mbss/max_sources" => self.max_sources = value.as_int(name)? as u16,
+            "mbss/ssl_threashold" => self.mbss_ssl_threashold = value.as_float(name)?,
             other => return Err(format!("unexpected field: {other}").into()),
         }
         Ok(())
