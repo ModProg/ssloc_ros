@@ -383,7 +383,7 @@ fn ssloc(
                         continue 'mbss;
                     }
                     config.max_sources = update.max_sources;
-                    config.tracking_decay = update.tracking_decay;
+                    config.tracking_persistence = update.tracking_persistence;
                     config.mbss_ssl_threshold = update.mbss_ssl_threshold;
                 };
                 let Ok((stamp, mut audio)) = audio_channel_recv.recv() else {
@@ -555,19 +555,8 @@ fn ssloc(
                                 el,
                                 stamp,
                                 intensity,
-                                id: track_index.fetch_add(1, atomic::Ordering::Relaxed),
+                                id: track_index.fetch_add(1, atomic::Ordering::SeqCst),
                             }),
-                            [(i, neighboor)] => {
-                                let i = *i;
-                                new_tracks.push(Track {
-                                    az,
-                                    el,
-                                    stamp,
-                                    intensity: neighboor.intensity.max(intensity),
-                                    id: neighboor.id,
-                                });
-                                last_tracks.remove(i);
-                            }
                             multiple => {
                                 // first one has highest intensity
                                 let neighboor = multiple[0].1;
@@ -575,7 +564,7 @@ fn ssloc(
                                     az,
                                     el,
                                     stamp,
-                                    intensity: neighboor.intensity.max(intensity),
+                                    intensity: (neighboor.intensity * 0.8).max(intensity),
                                     id: neighboor.id,
                                 });
                                 let idxs = multiple.iter().rev().map(|(i, _)| *i).collect_vec();
@@ -590,14 +579,10 @@ fn ssloc(
                         .chain(
                             mem::take::<Vec<_>>(last_tracks.as_mut())
                                 .into_iter()
-                                .map(|mut track| {
-                                    track.intensity *= config.tracking_decay;
-                                    track
-                                })
-                                .filter(|track| track.intensity > 0.),
+                                .filter(|track| track.stamp.seconds() + config.tracking_persistence >= stamp.seconds()),
                         )
                         .collect();
-                    sources.sort_unstable_by(|a, b| a.intensity.total_cmp(&b.intensity));
+                    sources.sort_unstable_by(|a, b| b.intensity.total_cmp(&a.intensity));
                     sources = if sources.len() > config.max_sources.into() {
                         sources[0..config.max_sources.into()].to_vec()
                     } else {
@@ -719,9 +704,9 @@ fn ssloc(
                                         ..Default::default()
                                     },
                                     scale: msgs::Vector3 {
-                                        x: 1.,
-                                        y: 0.2,
-                                        z: 0.2,
+                                        x: 1. * track.intensity / 8000.,
+                                        y: 0.1,
+                                        z: 0.1,
                                     },
                                     action: msgs::Marker::ADD as i32,
                                     lifetime: rosrust::Duration::from_seconds(1),

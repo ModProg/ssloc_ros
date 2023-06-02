@@ -43,7 +43,7 @@ pub struct Config {
     pub max_sources: u16,
     pub mbss: MbssConfig,
     pub mbss_ssl_threshold: f64,
-    pub tracking_decay: f64,
+    pub tracking_persistence: f64,
 }
 impl Config {
     pub fn init() -> rosrust::api::error::Result<Config> {
@@ -109,7 +109,7 @@ impl Config {
             max_sources: 5,
             mbss: MbssConfig::default(),
             mbss_ssl_threshold: 5000.,
-            tracking_decay: 0.5
+            tracking_persistence: 1.
         })
     }
 }
@@ -208,7 +208,7 @@ impl rosrust_dynamic_reconfigure::Config for Config {
                 self.device.channels.1,
             )
             .group(AUDIO_GROUP),
-            Property::new_enum("mbss/pooling", "max", ["max", "sum"]).group(MBSS_GROUP),
+            Property::new_enum("mbss/pooling", self.mbss.pooling.to_string(), ["max", "sum"]).group(MBSS_GROUP),
             Property::new_default_range(
                 "mbss/ssl_threshold",
                 self.mbss_ssl_threshold,
@@ -264,11 +264,11 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             .description("minimal angle between two audio sources")
             .group(MBSS_GROUP),
             Property::new_default_range(
-                "mbss/tracking_decay",
-                self.tracking_decay,
-                0.5,
-                0.,
+                "mbss/tracking_persistence",
+                self.tracking_persistence,
                 1.,
+                0.,
+                5.,
             )
             .description("factor sources from previous frames are reduced by per frame")
             .group(MBSS_GROUP),
@@ -348,6 +348,7 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             "mbss/min_angle" => self.mbss.min_angle = value.as_float(name)?,
             "mbss/max_sources" => self.max_sources = value.as_int(name)? as u16,
             "mbss/ssl_threshold" => self.mbss_ssl_threshold = value.as_float(name)?,
+            "mbss/tracking_persistence" => self.tracking_persistence = value.as_float(name)?,
             other => return Err(format!("unexpected field: {other}").into()),
         }
         Ok(())
