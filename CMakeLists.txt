@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 3.0)
 project(ssloc_ros)
 
-find_package(catkin REQUIRED COMPONENTS std_msgs ssloc_ros_msgs audio_common_msgs)
-catkin_package(CATKIN_DEPENDS message_runtime std_msgs ssloc_ros_msgs audio_common_msgs)
 
 option(SSLOC-odas-msgs "Enable odas compatible messages" OFF)
 option(SSLOC-audio_common_msgs-stamped "Enable stamped audio messages" OFF)
@@ -18,6 +16,12 @@ if(SSLOC-builtin-msgs)
   list(APPEND features -F builtin-msgs)
 endif()
 
+if(NOT SSLOC-builtin-msgs)
+  find_package(catkin REQUIRED COMPONENTS std_msgs ssloc_ros_msgs audio_common_msgs)
+  catkin_package(CATKIN_DEPENDS message_runtime std_msgs ssloc_ros_msgs audio_common_msgs)
+else()
+  catkin_package(CATKIN_DEPENDS message_runtime)
+endif()
 
 add_custom_target(ssloc
    ALL
