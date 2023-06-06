@@ -1,5 +1,5 @@
 use std::io::Cursor;
-use std::sync::atomic::AtomicI64;
+use std::sync::atomic::AtomicU32;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
 use std::{mem, thread};
@@ -14,7 +14,7 @@ use rosrust::error::ResultExt;
 use rosrust::{ros_err, ros_info, ros_warn, Message, Publisher, Time};
 use rosrust_dynamic_reconfigure::Updating;
 use ssloc::mbss::angular_distance;
-use ssloc::{for_format, Audio, AudioRecorder, Format, F};
+use ssloc::{for_format, Audio, AudioRecorder, DelayAndSum, Format, F};
 
 #[cfg(feature = "builtin-msgs")]
 mod msgs;
@@ -270,6 +270,13 @@ fn recorder(
                                 continue 'recorder;
                             }
                         };
+                        audio_info_topic.send(msgs::AudioInfo {
+                            channels: audio.channels().try_into().unwrap(),
+                            sample_rate: audio.sample_rate() as u32,
+                            sample_format: "FLOAT_LE".into(),
+                            bitrate: audio.channels() as u32 * audio.sample_rate() as u32 * 32,
+                            coding_format: "WAVE".into(),
+                        })?;
                         #[cfg_attr(feature = "audio_common_msgs-stamped", allow(unused))]
                         let subbed = audio_topic.has_subscribers();
                         #[cfg(feature = "audio_common_msgs-stamped")]
@@ -328,7 +335,7 @@ struct Track {
     el: F,
     stamp: rosrust::Time,
     intensity: F,
-    id: i64,
+    id: u32,
 }
 
 fn ssloc(
@@ -345,6 +352,13 @@ fn ssloc(
         let unit_sphere_ssl_points =
             rosrust::publish::<msgs::PointCloud2>("~unit_sphere_ssl_points", 20)?;
         let spectrums = rosrust::publish::<msgs::CompressedImage>("~spectrum/compressed", 20)?;
+
+        let audio_topic = rosrust::publish::<msgs::AudioData>("~sss/audio", 10)?;
+        #[cfg(feature = "audio_common_msgs-stamped")]
+        let audio_stamped_topic =
+            rosrust::publish::<msgs::AudioDataStamped>("~sss/audio_stamped", 10)?;
+        let mut audio_info_topic = rosrust::publish::<msgs::AudioInfo>("~sss/audio_info", 1)?;
+        audio_info_topic.set_latching(true);
 
         #[cfg(feature = "odas-msgs")]
         let odas_unit_sphere_sst = rosrust::publish::<msgs::OdasSstArrayStamped>("~odas/sst", 10)?;
@@ -363,15 +377,15 @@ fn ssloc(
         let last_tracks = Arc::new(Mutex::new(last_tracks));
 
         // continuiously increases and will wrap at some point
-        let track_index = AtomicI64::default();
+        let track_index = AtomicU32::default();
 
         'mbss: while rosrust::is_ok() {
-            let mbss = config.mbss.create(
-                config.mics[..config.channels as usize]
-                    .iter()
-                    .filter(|(_, enabled)| *enabled)
-                    .map(|(pos, _)| *pos),
-            );
+            let mics = config.mics[..config.channels as usize]
+                .iter()
+                .filter(|(_, enabled)| *enabled)
+                .map(|(pos, _)| *pos)
+                .collect_vec();
+            let mbss = config.mbss.create(mics.clone());
             while rosrust::is_ok() {
                 {
                     let update = updating_config.read();
@@ -520,7 +534,9 @@ fn ssloc(
 
                 let subbed = arrow_markers.has_subscribers()
                     || unit_sphere_sst.has_subscribers()
-                    || unit_sphere_sst_poses.has_subscribers();
+                    || unit_sphere_sst_poses.has_subscribers()
+                    || audio_topic.has_subscribers()
+                    || audio_stamped_topic.has_subscribers();
                 #[cfg(feature = "odas-msgs")]
                 let subbed = subbed
                     || odas_unit_sphere_sst.has_subscribers()
@@ -579,7 +595,10 @@ fn ssloc(
                         .chain(
                             mem::take::<Vec<_>>(last_tracks.as_mut())
                                 .into_iter()
-                                .filter(|track| track.stamp.seconds() + config.tracking_persistence >= stamp.seconds()),
+                                .filter(|track| {
+                                    track.stamp.seconds() + config.tracking_persistence
+                                        >= stamp.seconds()
+                                }),
                         )
                         .collect();
                     sources.sort_unstable_by(|a, b| b.intensity.total_cmp(&a.intensity));
@@ -600,7 +619,7 @@ fn ssloc(
                                         let position =
                                             ssloc::angles_to_unit_vec(track.az, track.el);
                                         msgs::UnitSst {
-                                            id: track.id,
+                                            id: track.id.into(),
                                             activity: track.intensity,
                                             x: position.x,
                                             y: position.y,
@@ -623,7 +642,7 @@ fn ssloc(
                                         let position =
                                             ssloc::angles_to_unit_vec(track.az, track.el);
                                         msgs::OdasSst {
-                                            id: track.id,
+                                            id: track.id.into(),
                                             activity: track.intensity,
                                             x: position.x,
                                             y: position.y,
@@ -676,7 +695,7 @@ fn ssloc(
                         }
                     }
                     if arrow_markers.has_subscribers() {
-                        for (idx, track) in sources.into_iter().enumerate() {
+                        for (idx, track) in sources.iter().enumerate() {
                             let rotation =
                                 UnitQuaternion::from_euler_angles(0., -track.el, track.az).coords;
                             log_error!(
@@ -715,6 +734,37 @@ fn ssloc(
                                 "error sending marker {err}"
                             );
                         }
+                    }
+                    let subbed = audio_topic.has_subscribers();
+                    #[cfg(feature = "audio_common_msgs-stamped")]
+                    let subbed = subbed || audio_stamped_topic.has_subscribers();
+                    if subbed {
+                        let config = DelayAndSum {
+                            mics: mics.clone(),
+                            filter: Some(11),
+                            ..Default::default()
+                        };
+                        let audio = Audio::from_channels(
+                            audio.sample_rate(),
+                            sources
+                                .into_iter()
+                                .sorted_by_key(|t| t.id)
+                                .map(|source| config.delay_and_sum(source.az, source.el, &audio)),
+                        );
+                        audio_info_topic.send(msgs::AudioInfo {
+                            channels: audio.channels().try_into().unwrap(),
+                            sample_rate: audio.sample_rate() as u32,
+                            sample_format: "FLOAT_LE".into(),
+                            bitrate: audio.channels() as u32 * audio.sample_rate() as u32 * 32,
+                            coding_format: "WAVE".into(),
+                        })?;
+                        let data = audio.wav_data(ssloc::WavFormat::Float, 32);
+                        #[cfg(feature = "audio_common_msgs-stamped")]
+                        audio_stamped_topic.send(msgs::AudioDataStamped {
+                            header,
+                            audio: msgs::AudioData { data: data.clone() },
+                        })?;
+                        audio_topic.send(msgs::AudioData { data })?;
                     }
                 }
             }
