@@ -547,6 +547,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "forr"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af0f379f5d161e07f0a58d9d9b3f9a1579f2854aab7b1847613ea3af6c468aec"
+dependencies = [
+ "manyhow",
+ "proc-macro-utils",
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
 name = "futures"
 version = "0.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -832,6 +844,28 @@ name = "log"
 version = "0.4.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "518ef76f2f87365916b142844c16d8fefd85039bc5699050210a7778ee1cd1de"
+
+[[package]]
+name = "manyhow"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "927cc3a197e078f29f3acc289d6355af6c988a2e6a4e9175940221ec3a65c484"
+dependencies = [
+ "manyhow-macros",
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
+name = "manyhow-macros"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e92933413756c852c7300b968ea310598328e01f260e1039086fe22764331c82"
+dependencies = [
+ "proc-macro-utils",
+ "proc-macro2",
+ "quote",
+]
 
 [[package]]
 name = "match_cfg"
@@ -1211,6 +1245,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-utils"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f59e109e2f795a5070e69578c4dc101068139f74616778025ae1011d4cd41a8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "smallvec",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.59"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1396,8 +1441,7 @@ dependencies = [
 [[package]]
 name = "rosrust_dynamic_reconfigure"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c9fb5a910ff18165fd2dcfa0000542221ec53360f3b5d0cabf11bfb3e22b882"
+source = "git+https://github.com/ModProg/rosrust_dynamic_reconfigure#2f3c49cdd8f36f49e8f47857805ddbdb123fe478"
 dependencies = [
  "crossbeam",
  "derive_more",
@@ -1619,12 +1663,11 @@ dependencies = [
 
 [[package]]
 name = "ssloc"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e06e63ff0556256ef09345e2f03973eb361f21a2cfbe53cfdf26c30a778f6fa6"
+version = "0.3.0"
 dependencies = [
  "alsa",
  "derive_more",
+ "forr",
  "image",
  "itertools",
  "nalgebra",

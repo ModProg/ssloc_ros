@@ -1,20 +1,20 @@
 use std::io::Cursor;
+use std::mem::size_of;
 use std::sync::atomic::AtomicI64;
 use std::sync::{atomic, Arc};
 use std::time::Duration;
-use std::{mem, thread};
+use std::{iter, mem, thread};
 
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use extend::ext;
 use image::ImageOutputFormat;
 use itertools::Itertools;
-use nalgebra::UnitQuaternion;
 use parking_lot::Mutex;
 use rosrust::error::ResultExt;
 use rosrust::{ros_err, ros_info, ros_warn, Message, Publisher, Time};
 use rosrust_dynamic_reconfigure::Updating;
 use ssloc::mbss::angular_distance;
-use ssloc::{for_format, Audio, AudioRecorder, Format, F};
+use ssloc::{for_format, Audio, AudioRecorder, DelayAndSum, Direction, Format, F};
 
 #[cfg(feature = "builtin-msgs")]
 mod msgs;
@@ -27,7 +27,7 @@ mod msgs {
         geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
         odas_ros/OdasSsl, odas_ros/OdasSslArrayStamped, odas_ros/OdasSst, odas_ros/OdasSstArrayStamped,
         sensor_msgs/CompressedImage, sensor_msgs/PointCloud2, sensor_msgs/PointField,
-        ssloc_ros_msgs/UnitSsl, ssloc_ros_msgs/UnitSslArray, ssloc_ros_msgs/UnitSst, ssloc_ros_msgs/UnitSstArray,
+        ssloc_ros_msgs/Ssl, ssloc_ros_msgs/SslArray, ssloc_ros_msgs/Sst, ssloc_ros_msgs/SstArray, ssloc_ros_msgs/SssMapping,
         std_msgs/ColorRGBA, std_msgs/Header,
         visualization_msgs/Marker,
     }
@@ -37,7 +37,7 @@ mod msgs {
         geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
         odas_ros/OdasSsl, odas_ros/OdasSslArrayStamped, odas_ros/OdasSst, odas_ros/OdasSstArrayStamped,
         sensor_msgs/CompressedImage, sensor_msgs/PointCloud2, sensor_msgs/PointField,
-        ssloc_ros_msgs/UnitSsl, ssloc_ros_msgs/UnitSslArray, ssloc_ros_msgs/UnitSst, ssloc_ros_msgs/UnitSstArray,
+        ssloc_ros_msgs/Ssl, ssloc_ros_msgs/SslArray, ssloc_ros_msgs/Sst, ssloc_ros_msgs/SstArray, ssloc_ros_msgs/SssMapping,
         std_msgs/ColorRGBA, std_msgs/Header,
         visualization_msgs/Marker,
     }
@@ -46,7 +46,7 @@ mod msgs {
         audio_common_msgs/AudioData, audio_common_msgs/AudioInfo,
         geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
         sensor_msgs/CompressedImage, sensor_msgs/PointCloud2, sensor_msgs/PointField,
-        ssloc_ros_msgs/UnitSsl, ssloc_ros_msgs/UnitSslArray, ssloc_ros_msgs/UnitSst, ssloc_ros_msgs/UnitSstArray,
+        ssloc_ros_msgs/Ssl, ssloc_ros_msgs/SslArray, ssloc_ros_msgs/Sst, ssloc_ros_msgs/SstArray, ssloc_ros_msgs/SssMapping,
         std_msgs/ColorRGBA, std_msgs/Header,
         visualization_msgs/Marker,
     }
@@ -55,7 +55,7 @@ mod msgs {
         audio_common_msgs/AudioData, audio_common_msgs/AudioDataStamped, audio_common_msgs/AudioInfo,
         geometry_msgs/Point, geometry_msgs/Pose, geometry_msgs/PoseArray, geometry_msgs/Quaternion, geometry_msgs/Vector3,
         sensor_msgs/CompressedImage, sensor_msgs/PointCloud2, sensor_msgs/PointField,
-        ssloc_ros_msgs/UnitSsl, ssloc_ros_msgs/UnitSslArray, ssloc_ros_msgs/UnitSst, ssloc_ros_msgs/UnitSstArray,
+        ssloc_ros_msgs/Ssl, ssloc_ros_msgs/SslArray, ssloc_ros_msgs/Sst, ssloc_ros_msgs/SstArray, ssloc_ros_msgs/SssMapping,
         std_msgs/ColorRGBA, std_msgs/Header,
         visualization_msgs/Marker,
     }
@@ -66,7 +66,7 @@ mod msgs {
     #[cfg(feature = "odas-msgs")]
     pub use odas_ros::{OdasSsl, OdasSslArrayStamped, OdasSst, OdasSstArrayStamped};
     pub use sensor_msgs::{CompressedImage, PointCloud2, PointField};
-    pub use ssloc_ros_msgs::{UnitSsl, UnitSslArray, UnitSst, UnitSstArray};
+    pub use ssloc_ros_msgs::{Ssl, SslArray, Sst, SstArray};
     pub use std_msgs::{ColorRGBA, Header};
     pub use visualization_msgs::Marker;
 }
@@ -171,6 +171,16 @@ fn recorder(
 
         let mut config = updating_config.copy();
         'recorder: while rosrust::is_ok() {
+            log_error!(
+                audio_info_topic.send(msgs::AudioInfo {
+                    channels: config.channels as u8,
+                    sample_rate: config.rate.into(),
+                    sample_format: "FLOAT32LE".into(),
+                    bitrate: (size_of::<f32>() as u32) * 8 * config.rate as u32,
+                    coding_format: "wave".into(),
+                }),
+                "error sending audio info message {err}"
+            );
             if config.use_audio_messages {
                 todo!("audio messages")
                 // let audio_channel_send = audio_channel_send.clone();
@@ -324,11 +334,11 @@ fn recorder(
 
 #[derive(Debug, Clone, Copy)]
 struct Track {
-    az: F,
-    el: F,
+    direction: Direction,
     stamp: rosrust::Time,
-    intensity: F,
+    power: F,
     id: i64,
+    channel: Option<usize>,
 }
 
 fn ssloc(
@@ -338,13 +348,21 @@ fn ssloc(
 ) -> impl FnOnce() -> Result {
     move || {
         let arrow_markers = rosrust::publish::<msgs::Marker>("~arrow_markers", 20)?;
-        let unit_sphere_sst = rosrust::publish::<msgs::UnitSstArray>("~unit_sphere_sst", 20)?;
+        let unit_sphere_sst = rosrust::publish::<msgs::SstArray>("~unit_sphere_sst", 20)?;
         let unit_sphere_sst_poses =
             rosrust::publish::<msgs::PoseArray>("~unit_sphere_sst_poses", 20)?;
-        let unit_sphere_ssl = rosrust::publish::<msgs::UnitSslArray>("~unit_sphere_ssl", 20)?;
+        let unit_sphere_ssl = rosrust::publish::<msgs::SslArray>("~unit_sphere_ssl", 20)?;
         let unit_sphere_ssl_points =
             rosrust::publish::<msgs::PointCloud2>("~unit_sphere_ssl_points", 20)?;
         let spectrums = rosrust::publish::<msgs::CompressedImage>("~spectrum/compressed", 20)?;
+        let mut sss_mapping = rosrust::publish::<msgs::SssMapping>("~sss/mapping", 10)?;
+        let sss_audio_topic = rosrust::publish::<msgs::AudioData>("~sss/audio", 10)?;
+        #[cfg(feature = "audio_common_msgs-stamped")]
+        let sss_audio_stamped_topic =
+            rosrust::publish::<msgs::AudioDataStamped>("~sss/audio_stamped", 10)?;
+        let mut sss_audio_info_topic = rosrust::publish::<msgs::AudioInfo>("~sss/audio_info", 10)?;
+        sss_audio_info_topic.set_latching(true);
+        sss_mapping.set_latching(true);
 
         #[cfg(feature = "odas-msgs")]
         let odas_unit_sphere_sst = rosrust::publish::<msgs::OdasSstArrayStamped>("~odas/sst", 10)?;
@@ -366,12 +384,17 @@ fn ssloc(
         let track_index = AtomicI64::default();
 
         'mbss: while rosrust::is_ok() {
-            let mbss = config.mbss.create(
-                config.mics[..config.channels as usize]
-                    .iter()
-                    .filter(|(_, enabled)| *enabled)
-                    .map(|(pos, _)| *pos),
-            );
+            let mics = config.mics[..config.channels as usize]
+                .iter()
+                .filter(|(_, enabled)| *enabled)
+                .map(|(pos, _)| *pos)
+                .collect_vec();
+            let mbss = config.mbss.create(mics.clone());
+            let das = DelayAndSum {
+                speed_of_sound: config.mbss.speed_of_sound,
+                mics,
+                ..Default::default()
+            };
             while rosrust::is_ok() {
                 {
                     let update = updating_config.read();
@@ -423,20 +446,24 @@ fn ssloc(
                     || odas_unit_sphere_ssl.has_subscribers()
                     || odas_unit_sphere_ssl_points.has_subscribers();
                 if subbed {
-                    let locations =
-                        mbss.unit_sphere_spectrum(spectrum.view(), config.mbss_ssl_threshold);
+                    let locations = mbss.spectrum(spectrum.view(), config.mbss_ssl_threshold);
 
                     if unit_sphere_ssl.has_subscribers() {
                         log_error!(
-                            unit_sphere_ssl.send(msgs::UnitSslArray {
+                            unit_sphere_ssl.send(msgs::SslArray {
                                 header: header.clone(),
                                 sources: locations
                                     .iter()
-                                    .map(|(position, e)| msgs::UnitSsl {
-                                        x: position.x,
-                                        y: position.y,
-                                        z: position.z,
-                                        E: *e,
+                                    .map(|(direction, p)| {
+                                        let position = direction.to_unit_vec();
+                                        msgs::Ssl {
+                                            x: position.x,
+                                            y: position.y,
+                                            z: position.z,
+                                            azimuth: direction.azimuth,
+                                            elevation: direction.elevation,
+                                            P: *p,
+                                        }
                                     })
                                     .collect(),
                             }),
@@ -450,11 +477,14 @@ fn ssloc(
                                 header: header.clone(),
                                 sources: locations
                                     .iter()
-                                    .map(|(position, e)| msgs::OdasSsl {
-                                        x: position.x,
-                                        y: position.y,
-                                        z: position.z,
-                                        E: *e,
+                                    .map(|(direction, e)| {
+                                        let position = direction.to_unit_vec();
+                                        msgs::OdasSsl {
+                                            x: position.x,
+                                            y: position.y,
+                                            z: position.z,
+                                            E: *e,
+                                        }
                                     })
                                     .collect(),
                             }),
@@ -495,7 +525,8 @@ fn ssloc(
                             point_step: 16,
                             data: locations
                                 .iter()
-                                .flat_map(|(position, e)| {
+                                .flat_map(|(direction, e)| {
+                                    let position = direction.to_unit_vec();
                                     [position.x, position.y, position.z, *e]
                                         .into_iter()
                                         .flat_map(|c| (c as f32).to_le_bytes())
@@ -526,7 +557,11 @@ fn ssloc(
                     || odas_unit_sphere_sst.has_subscribers()
                     || odas_unit_sphere_ssl_points.has_subscribers();
 
-                if subbed {
+                let sss_subbed = sss_audio_topic.has_subscribers();
+                #[cfg(feature = "audio_common_msgs-stamped")]
+                let sss_subbed = sss_subbed || sss_audio_stamped_topic.has_subscribers();
+
+                if subbed || sss_subbed {
                     let mut last_tracks = last_tracks
                         .try_lock_for(Duration::from_secs(1))
                         .expect("should not deadlock");
@@ -537,7 +572,7 @@ fn ssloc(
 
                     let mut new_tracks = Vec::new();
 
-                    for (az, el, intensity) in mbss
+                    for (direction, intensity) in mbss
                         .find_sources(spectrum.view(), config.max_sources.into())
                         .into_iter()
                         .filter(|(.., strength)| *strength > config.mbss_ssl_threshold)
@@ -546,26 +581,26 @@ fn ssloc(
                             .iter()
                             .enumerate()
                             .filter(|(_, track)| {
-                                angular_distance(track.az, track.el, az, el) < config.mbss.min_angle
+                                angular_distance(track.direction, direction) < config.mbss.min_angle
                             })
                             .collect();
                         match neighboors.as_slice() {
                             [] => new_tracks.push(Track {
-                                az,
-                                el,
+                                direction,
                                 stamp,
-                                intensity,
+                                power: intensity,
                                 id: track_index.fetch_add(1, atomic::Ordering::SeqCst),
+                                channel: None,
                             }),
                             multiple => {
                                 // first one has highest intensity
                                 let neighboor = multiple[0].1;
                                 new_tracks.push(Track {
-                                    az,
-                                    el,
+                                    direction,
                                     stamp,
-                                    intensity: (neighboor.intensity * 0.8).max(intensity),
+                                    power: (neighboor.power * 0.8).max(intensity),
                                     id: neighboor.id,
+                                    channel: neighboor.channel,
                                 });
                                 let idxs = multiple.iter().rev().map(|(i, _)| *i).collect_vec();
                                 for i in idxs {
@@ -579,32 +614,51 @@ fn ssloc(
                         .chain(
                             mem::take::<Vec<_>>(last_tracks.as_mut())
                                 .into_iter()
-                                .filter(|track| track.stamp.seconds() + config.tracking_persistence >= stamp.seconds()),
+                                .filter(|track| {
+                                    track.stamp.seconds() + config.tracking_persistence
+                                        >= stamp.seconds()
+                                }),
                         )
                         .collect();
-                    sources.sort_unstable_by(|a, b| b.intensity.total_cmp(&a.intensity));
+                    sources.sort_unstable_by(|a, b| b.power.total_cmp(&a.power));
                     sources = if sources.len() > config.max_sources.into() {
                         sources[0..config.max_sources.into()].to_vec()
                     } else {
                         sources
                     };
-                    *last_tracks = sources.clone();
+                    // Assign channels to tracks without channels
+                    let mut min = 0;
+                    *last_tracks = sources
+                        .iter()
+                        .map(|&(mut t)| {
+                            if t.channel.is_some() {
+                                t
+                            } else {
+                                min = (min..)
+                                    .find(|&c| !sources.iter().any(|t| t.channel == Some(c)))
+                                    .expect("there should be a usize that is not taken");
+                                t.channel = Some(min);
+                                t
+                            }
+                        })
+                        .collect();
                     drop(last_tracks);
                     if unit_sphere_sst.has_subscribers() {
                         log_error!(
-                            unit_sphere_sst.send(msgs::UnitSstArray {
+                            unit_sphere_sst.send(msgs::SstArray {
                                 header: header.clone(),
                                 sources: sources
                                     .iter()
                                     .map(|track| {
-                                        let position =
-                                            ssloc::angles_to_unit_vec(track.az, track.el);
-                                        msgs::UnitSst {
+                                        let position = track.direction.to_unit_vec();
+                                        msgs::Sst {
                                             id: track.id,
-                                            activity: track.intensity,
+                                            P: track.power,
                                             x: position.x,
                                             y: position.y,
                                             z: position.z,
+                                            azimuth: track.direction.azimuth,
+                                            elevation: track.direction.elevation,
                                         }
                                     })
                                     .collect(),
@@ -620,11 +674,10 @@ fn ssloc(
                                 sources: sources
                                     .iter()
                                     .map(|track| {
-                                        let position =
-                                            ssloc::angles_to_unit_vec(track.az, track.el);
+                                        let position = track.direction.to_unit_vec();
                                         msgs::OdasSst {
                                             id: track.id,
-                                            activity: track.intensity,
+                                            activity: track.power,
                                             x: position.x,
                                             y: position.y,
                                             z: position.z,
@@ -647,8 +700,7 @@ fn ssloc(
                             poses: sources
                                 .iter()
                                 .map(|track| {
-                                    let quaternion =
-                                        ssloc::angles_to_quaternion(track.az, track.el).coords;
+                                    let quaternion = track.direction.to_quaternion().coords;
                                     msgs::Pose {
                                         orientation: msgs::Quaternion {
                                             x: quaternion.x,
@@ -676,9 +728,8 @@ fn ssloc(
                         }
                     }
                     if arrow_markers.has_subscribers() {
-                        for (idx, track) in sources.into_iter().enumerate() {
-                            let rotation =
-                                UnitQuaternion::from_euler_angles(0., -track.el, track.az).coords;
+                        for (idx, track) in sources.iter().enumerate() {
+                            let rotation = track.direction.to_quaternion().coords;
                             log_error!(
                                 arrow_markers.send(msgs::Marker {
                                     header: header.clone(),
@@ -704,7 +755,7 @@ fn ssloc(
                                         ..Default::default()
                                     },
                                     scale: msgs::Vector3 {
-                                        x: 1. * track.intensity / 8000.,
+                                        x: 1. * track.power / 8000.,
                                         y: 0.1,
                                         z: 0.1,
                                     },
@@ -715,6 +766,63 @@ fn ssloc(
                                 "error sending marker {err}"
                             );
                         }
+                    }
+                    if sss_subbed {
+                        let mut channels = Vec::new();
+                        let mut mapping = Vec::new();
+                        sources.sort_by_key(|t| t.channel.expect("all channels are set"));
+                        let length = das.expected_len(&audio);
+                        for track in sources {
+                            let channel = track.channel.unwrap();
+                            assert!(
+                                channels.len() <= channel,
+                                "channels should be sorted correctly"
+                            );
+                            // insert empty data for unused channels
+                            channels.extend(
+                                iter::repeat(vec![0.0; length]).take(channels.len() - channel),
+                            );
+                            mapping.extend(iter::repeat(0).take(channels.len() - channel));
+                            let data = das.delay_and_sum(track.direction, &audio).collect_vec();
+                            assert_eq!(data.len(), length);
+                            channels.push(data);
+                            mapping.push(track.id);
+                        }
+
+                        let audio = Audio::from_channels(audio.sample_rate(), channels);
+                        // TODO consider supporting more than one output format.
+                        let audio = msgs::AudioData {
+                            data: audio.to_interleaved().flat_map(f32::to_le_bytes).collect(),
+                        };
+                        log_error!(
+                            sss_audio_info_topic.send(msgs::AudioInfo {
+                                channels: config.channels as u8,
+                                sample_rate: config.rate.into(),
+                                sample_format: "FLOAT32LE".into(),
+                                bitrate: (size_of::<f32>() as u32) * 8 * config.rate as u32,
+                                coding_format: "wave".into(),
+                            }),
+                            "error sending sss audio info message {err}"
+                        );
+                        log_error!(
+                            sss_mapping.send(msgs::SssMapping {
+                                header: header.clone(),
+                                sources: mapping
+                            }),
+                            "error sending sss channel mapping message {err}"
+                        );
+                        #[cfg(feature = "audio_common_msgs-stamped")]
+                        log_error!(
+                            sss_audio_stamped_topic.send(msgs::AudioDataStamped {
+                                header: header.clone(),
+                                audio: audio.clone()
+                            }),
+                            "error sending sss audio message {err}"
+                        );
+                        log_error!(
+                            sss_audio_topic.send(audio),
+                            "error sending sss audio message {err}"
+                        );
                     }
                 }
             }
