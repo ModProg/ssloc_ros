@@ -782,7 +782,7 @@ fn ssloc(
                             channels.extend(
                                 iter::repeat(vec![0.0; length]).take(channels.len() - channel),
                             );
-                            mapping.extend(iter::repeat(0).take(channels.len() - channel));
+                            mapping.extend(iter::repeat(-1).take(channels.len() - channel));
                             let data = das.delay_and_sum(track.direction, &audio).collect_vec();
                             assert_eq!(data.len(), length);
                             channels.push(data);
