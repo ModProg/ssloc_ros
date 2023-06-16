@@ -158,7 +158,7 @@ fn main() -> Result {
 
 fn recorder(
     updating_config: Updating<Config>,
-    #[cfg_attr(not(eature = "audio_common_msgs-stamped"), allow(unused))] frame_id: String,
+    #[cfg_attr(not(feature = "audio_common_msgs-stamped"), allow(unused))] frame_id: String,
     audio_channel_send: Sender<(Time, Audio)>,
     audio_channel_recv: Receiver<(Time, Audio)>,
 ) -> impl FnOnce() -> Result {

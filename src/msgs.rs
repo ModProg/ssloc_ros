@@ -1,4 +1,6 @@
 #![allow(clippy::all, unused)]
+//! Generate the contents of this module by expanding the first 
+//! `rosrust::rosmsg_include! {` in `main.rs`
 pub mod ssloc_ros_msgs {
     #[allow(dead_code, non_camel_case_types, non_snake_case)]
     #[derive(Clone)]
