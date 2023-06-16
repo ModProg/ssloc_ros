@@ -10,7 +10,7 @@ readme = "README.md"
 repository = "https://github.com/ModProg/ssloc_ros"
 
 [features]
-default = ["builtin-msgs"]
+# default = ["builtin-msgs"]
 # default = ["odas-msgs", "audio_common_msgs-stamped"]
 odas-msgs = []
 audio_common_msgs-stamped = []
@@ -31,7 +31,8 @@ rosrust = "0.9"
 # rosrust_dynamic_reconfigure = { version = "0.1.0", path = "../../../rosrust_dynamic_reconfigure" }
 rosrust_dynamic_reconfigure.git = "https://github.com/ModProg/rosrust_dynamic_reconfigure"
 # ssloc = {version = "0.2", default-features = false, features = ["realtime", "image"]}
-ssloc = {path = "../../../ssloc", default-features = false, features = ["realtime", "image"]}
+ssloc = {git = "https://github.com/ModProg/ssloc", default-features = false, features = ["realtime", "image"]}
+# ssloc = {path = "../../../ssloc", default-features = false, features = ["realtime", "image"]}
 
 [[package.metadata.release.pre-release-replacements]]
 file = "CHANGELOG.md"
