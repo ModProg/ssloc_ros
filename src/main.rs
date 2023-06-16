@@ -66,7 +66,7 @@ mod msgs {
     #[cfg(feature = "odas-msgs")]
     pub use odas_ros::{OdasSsl, OdasSslArrayStamped, OdasSst, OdasSstArrayStamped};
     pub use sensor_msgs::{CompressedImage, PointCloud2, PointField};
-    pub use ssloc_ros_msgs::{Ssl, SslArray, Sst, SstArray};
+    pub use ssloc_ros_msgs::{Ssl, SslArray, Sst, SstArray, SssMapping};
     pub use std_msgs::{ColorRGBA, Header};
     pub use visualization_msgs::Marker;
 }
