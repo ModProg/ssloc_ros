@@ -20,6 +20,7 @@ if(NOT SSLOC-builtin-msgs)
   find_package(catkin REQUIRED COMPONENTS std_msgs ssloc_ros_msgs audio_common_msgs)
   catkin_package(CATKIN_DEPENDS message_runtime std_msgs ssloc_ros_msgs audio_common_msgs)
 else()
+  find_package(catkin)
   catkin_package(CATKIN_DEPENDS message_runtime)
 endif()
 
