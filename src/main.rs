@@ -883,7 +883,7 @@ fn ssloc(
                             );
                             // insert empty data for unused channels
                             channels.extend(
-                                iter::repeat(vec![0.0; length]).take(channels.len() - channel),
+                                iter::repeat(vec![0.0; length]).take(channel - channels.len()),
                             );
                             mapping.extend(iter::repeat(-1).take(channels.len() - channel));
                             let data = das.beam_form(track.direction, &audio).collect_vec();
