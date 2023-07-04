@@ -740,6 +740,7 @@ fn ssloc(
                                     .find(|&c| !sources.iter().any(|t| t.channel == Some(c)))
                                     .expect("there should be a usize that is not taken");
                                 t.channel = Some(min);
+                                min += 1;
                                 t
                             }
                         })
