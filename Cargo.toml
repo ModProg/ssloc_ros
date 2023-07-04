@@ -10,7 +10,7 @@ readme = "README.md"
 repository = "https://github.com/ModProg/ssloc_ros"
 
 [features]
-# default = ["builtin-msgs"]
+default = ["builtin-msgs"]
 # default = ["odas-msgs", "audio_common_msgs-stamped"]
 odas-msgs = []
 audio_common_msgs-stamped = []
@@ -21,17 +21,18 @@ alsa = "0.7"
 crossbeam = { version = "0.8", features = ["crossbeam-channel"] }
 env_logger = { version = "0.10", default-features = false }
 extend = "1.2"
+float-cmp = "0.9.0"
 image = { version = "0.24", default-features = false, features = ["png"] }
 itertools = "0.10.5"
 nalgebra = "0.32"
 parking_lot = "0.12.1"
 rosrust = "0.9"
-# rosrust_dynamic_reconfigure = "0.1"
+rosrust_dynamic_reconfigure = "0.2"
 #rosrust_dynamic_reconfigure = { version = "0.1.0", path = "../../../../../Development/Rust/rosrust_dynamic_reconfigure" }
 # rosrust_dynamic_reconfigure = { version = "0.1.0", path = "../../../rosrust_dynamic_reconfigure" }
-rosrust_dynamic_reconfigure.git = "https://github.com/ModProg/rosrust_dynamic_reconfigure"
-# ssloc = {version = "0.2", default-features = false, features = ["realtime", "image"]}
-ssloc = {git = "https://github.com/ModProg/ssloc", default-features = false, features = ["realtime", "image"]}
+# rosrust_dynamic_reconfigure.git = "https://github.com/ModProg/rosrust_dynamic_reconfigure"
+ssloc = {version = "0.4", default-features = false, features = ["realtime", "image"]}
+# ssloc = {git = "https://github.com/ModProg/ssloc", default-features = false, features = ["realtime", "image"]}
 # ssloc = {path = "../../../ssloc", default-features = false, features = ["realtime", "image"]}
 
 [[package.metadata.release.pre-release-replacements]]

@@ -11,10 +11,10 @@ use image::ImageOutputFormat;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use rosrust::error::ResultExt;
-use rosrust::{ros_err, ros_info, ros_warn, Message, Publisher, Time};
+use rosrust::{ros_err, ros_info, ros_warn, ros_warn_throttle, Message, Publisher, Time};
 use rosrust_dynamic_reconfigure::Updating;
 use ssloc::mbss::angular_distance;
-use ssloc::{for_format, Audio, AudioRecorder, DelayAndSum, Direction, Format, F};
+use ssloc::{for_format, Audio, AudioRecorder, DelayAndSum, Direction, Format, PcmFormat, F};
 
 #[cfg(feature = "builtin-msgs")]
 mod msgs;
@@ -66,7 +66,7 @@ mod msgs {
     #[cfg(feature = "odas-msgs")]
     pub use odas_ros::{OdasSsl, OdasSslArrayStamped, OdasSst, OdasSstArrayStamped};
     pub use sensor_msgs::{CompressedImage, PointCloud2, PointField};
-    pub use ssloc_ros_msgs::{Ssl, SslArray, Sst, SstArray, SssMapping};
+    pub use ssloc_ros_msgs::{Ssl, SslArray, SssMapping, Sst, SstArray};
     pub use std_msgs::{ColorRGBA, Header};
     pub use visualization_msgs::Marker;
 }
@@ -95,6 +95,17 @@ macro_rules! log_error {
         }
     };
 }
+macro_rules! continue_error {
+    ($expr:expr, $($fmt:tt)*) => {
+        match $expr {
+            Ok(o) => o,
+            Err(err) => {
+                ros_err!($($fmt)*, err=err);
+                continue;
+            },
+        }
+    };
+}
 
 fn main() -> Result {
     env_logger::init();
@@ -104,6 +115,10 @@ fn main() -> Result {
         .expect("should get parameter")
         .get()
         .chain_err(|| "getting ~frame_id parameter")?;
+    let recording_only: bool = rosrust::param("~recording_only")
+        .expect("should get parameter")
+        .get()
+        .unwrap_or_default();
     let ssloc_threads = rosrust::param("~ssloc_threads")
         .expect("should get parameter")
         .get::<usize>()
@@ -123,10 +138,13 @@ fn main() -> Result {
             frame_id.clone(),
             audio_channel_send,
             audio_channel_recv.clone(),
+            recording_only,
         ))
         .expect("spawning audio thread should not panic");
 
-    let ssloc: Vec<_> = (0..ssloc_threads)
+    let ssloc: Vec<_> = (0..(!recording_only)
+        .then_some(ssloc_threads)
+        .unwrap_or_default())
         .map(|idx| {
             thread::Builder::new()
                 .name(format!("ssloc{idx}"))
@@ -161,6 +179,7 @@ fn recorder(
     #[cfg_attr(not(feature = "audio_common_msgs-stamped"), allow(unused))] frame_id: String,
     audio_channel_send: Sender<(Time, Audio)>,
     audio_channel_recv: Receiver<(Time, Audio)>,
+    recording_only: bool,
 ) -> impl FnOnce() -> Result {
     move || {
         let audio_topic = rosrust::publish::<msgs::AudioData>("~audio", 10)?;
@@ -171,71 +190,155 @@ fn recorder(
 
         let mut config = updating_config.copy();
         'recorder: while rosrust::is_ok() {
-            log_error!(
-                audio_info_topic.send(msgs::AudioInfo {
-                    channels: config.channels as u8,
-                    sample_rate: config.rate.into(),
-                    sample_format: "FLOAT32LE".into(),
-                    bitrate: (size_of::<f32>() as u32) * 8 * config.rate as u32,
-                    coding_format: "wave".into(),
-                }),
-                "error sending audio info message {err}"
-            );
-            if config.use_audio_messages {
-                todo!("audio messages")
-                // let audio_channel_send = audio_channel_send.clone();
-                // let audio_channel_recv = audio_channel_recv.clone();
-                // log_error!(
-                //     rosrust::subscribe(
-                //         &config.audio_message_topic,
-                //         20,
-                //         move |msg: msgs::Audio| {
-                //             if audio_channel_send.is_full() {
-                //                 match audio_channel_recv.try_recv() {
-                //                     Ok((stamp, _)) => {
-                //                         ros_warn!(
-                //                             "recording from {stamp}
-                // was dropped, ssloc \
-                //                             operation too slow"
-                //                         );
-                //                     }
-                //                     Err(TryRecvError::Empty) => { /*
-                // was emptied by consumer */
-                //                     }
-                //                     Err(TryRecvError::Disconnected)
-                // => {
-                // ros_err!(
-                // "channel disconnected, process must have exited"
-                //                         );
-                //                         return;
-                //                     }
-                //                 }
-                //             }
-                //             match
-                // audio_channel_send.send((msg.header.stamp,
-                // Audio::from_wav(Cursor::new(msg.data)))) {
-                //                 Ok(_) => {}
-                //                 Err(_) => {
-                //                     ros_err!("channel disconnected,
-                // process must have exited");
-                //                 }
-                //             }
-                //         },
-                //     ),
-                //     "error subscribing to `audio_message_topic` {}
-                // {err}",     config.
-                // audio_message_topic );
-                // while rosrust::is_ok() {
-                //     let update = updating_config.read();
-                //     if !update.use_audio_messages
-                //         || config.audio_message_topic !=
-                // update.audio_message_topic
-                //     {
-                //         config = update.clone();
-                //         continue 'recorder;
-                //     }
-                // }
+            if let Some(audio_topic) = config.audio_message_topic.clone() {
+                let audio_channel_send = audio_channel_send.clone();
+                let audio_channel_recv = audio_channel_recv.clone();
+                let audio_info_topic = format!("{audio_topic}/audio_info");
+                let audio_stamped_topic = format!("{audio_topic}/audio_stamped");
+                let audio_info = Arc::new(Mutex::new(None));
+                let recorded_with = Arc::new(Mutex::new(None));
+                let _audio_info_subscriber = {
+                    let audio_info = audio_info.clone();
+                    let audio_info_topic = audio_info_topic.clone();
+                    continue_error!(
+                        rosrust::subscribe(
+                            &audio_info_topic.clone(),
+                            1,
+                            move |info: msgs::AudioInfo| {
+                                ros_warn!("`{audio_info_topic} = {info:?}");
+                                if info.coding_format != "wave" {
+                                    ros_err!(
+                                        "unsuported coding_format: `{}`, only `wave` is supported.",
+                                        info.coding_format
+                                    );
+                                    return;
+                                }
+                                if info.channels as u16 != config.channels {
+                                    todo!("missmatched channel count")
+                                }
+                                *audio_info.try_lock_for(Duration::from_secs(1)).unwrap() =
+                                    Some(info);
+                            }
+                        ),
+                        "{err}"
+                    )
+                };
+                // let timestamp = Arc::new(Mutex::new(rosrust::now()));
+                // let audio_data = Arc::new(Mutex::new(Vec::<u8>::new()));
+                let _audio_stamped_recorder = {
+                    let audio_info = audio_info.clone();
+                    let recorded_with = recorded_with.clone();
+                    // let updating_config = updating_config.clone();
+                    continue_error!(
+                        rosrust::subscribe(
+                            &audio_stamped_topic,
+                            20,
+                            move |msg: msgs::AudioDataStamped| {
+                                let Some(audio_info) = audio_info
+                                        .try_lock_for(Duration::from_secs(1))
+                                        .unwrap()
+                                        .clone()
+                                else {
+                                    ros_warn_throttle!(1., "`{audio_info_topic}` not yet recieved");
+                                    return;
+                                };
+                                // let mut audio_data =
+                                //     audio_data.try_lock_for(Duration::from_secs(1)).unwrap();
+                                let mut recorded_with =
+                                    recorded_with.try_lock_for(Duration::from_secs(1)).unwrap();
+                                if recorded_with.is_none() {
+                                    *recorded_with = Some(audio_info.clone());
+                                };
+                                // let len = { updating_config.read().localisation_frame };
+                                let rec_with = recorded_with.as_ref().unwrap();
+                                let sample_format: PcmFormat = match rec_with.sample_format.parse()
+                                {
+                                    Ok(ok) => ok,
+                                    Err(err) => {
+                                        ros_err!(
+                                            "Unsupported sample_format `{}`: {err:?}",
+                                            recorded_with.as_ref().unwrap().sample_format
+                                        );
+                                        return;
+                                    }
+                                };
+                                // TODO make recording possible using longer time frames than
+                                // sender
+                                // if /* (&audio_info != rec_with
+                                    // || audio_data.len() as F
+                                    //     >= rec_with.sample_rate as F
+                                    //         * len
+                                    //         * rec_with.channels as F
+                                    //         * sample_format.bytes() as F)
+                                    // &&*/ // !audio_data.is_empty()
+                                {
+                                    if audio_channel_send.is_full() {
+                                        match audio_channel_recv.try_recv() {
+                                            Ok((stamp, _)) => {
+                                                ros_warn!(
+                                                    "recording from {stamp} was dropped, ssloc \
+                                                     operation too slow"
+                                                );
+                                            }
+                                            Err(TryRecvError::Empty) => { /* was emptied by consumer */
+                                            }
+                                            Err(TryRecvError::Disconnected) => {
+                                                ros_err!(
+                                                    "channel disconnected, process must have \
+                                                     exited"
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    let audio = Audio::from_pcm_bytes(
+                                        sample_format,
+                                        audio_info.sample_rate.into(),
+                                        audio_info.channels.into(),
+                                        &msg.audio.data,
+                                    );
+                                    match audio_channel_send.send((msg.header.stamp, audio)) {
+                                        Ok(_) => {}
+                                        Err(_) => {
+                                            ros_err!(
+                                                "channel disconnected, process must have exited"
+                                            );
+                                        }
+                                    }
+                                    // audio_data.clear();
+                                    // *recorded_with = Some(audio_info);
+                                    // *timestamp.try_lock_for(Duration::from_secs(1)).unwrap() =
+                                    //     msg.header.stamp;
+                                }
+                                // audio_data.extend_from_slice(&msg.audio.data)
+                            },
+                        ),
+                        "error subscribing to `audio_message_topic` {} {err}",
+                        audio_topic
+                    )
+                };
+                let rate = rosrust::rate(10.0);
+                while rosrust::is_ok() {
+                    rate.sleep();
+                    let update = updating_config.read();
+                    if config.audio_message_topic != update.audio_message_topic
+                        || config.channels != update.channels
+                    {
+                        config = update.clone();
+                        continue 'recorder;
+                    }
+                }
             } else {
+                log_error!(
+                    audio_info_topic.send(msgs::AudioInfo {
+                        channels: config.channels as u8,
+                        sample_rate: config.rate.into(),
+                        sample_format: "F32LE".into(),
+                        bitrate: (size_of::<f32>() as u32) * 8 * config.rate as u32,
+                        coding_format: "wave".into(),
+                    }),
+                    "error sending audio info message {err}"
+                );
                 for_format!(config.format, {
                     let mut recorder = match AudioRecorder::<FORMAT>::new(
                         config.device.name.clone(),
@@ -267,7 +370,7 @@ fn recorder(
                                 || update.rate != config.rate
                                 || update.format != config.format
                                 || update.localisation_frame != config.localisation_frame
-                                || update.use_audio_messages
+                                || update.audio_message_topic.is_some()
                             {
                                 config = update.clone();
                                 continue 'recorder;
@@ -286,42 +389,41 @@ fn recorder(
                         let subbed = audio_stamped_topic.has_subscribers();
                         if subbed {
                             // TODO consider supporting more than one output format.
-                            let audio = msgs::AudioData {
+                            let msg = msgs::AudioData {
                                 data: audio.to_interleaved().flat_map(f32::to_le_bytes).collect(),
                             };
                             #[cfg(feature = "audio_common_msgs-stamped")]
                             log_error!(
                                 audio_stamped_topic.send(msgs::AudioDataStamped {
                                     header: header.clone(),
-                                    audio: audio.clone()
+                                    audio: msg.clone()
                                 }),
                                 "error sending audio message {err}"
                             );
-                            log_error!(
-                                audio_topic.send(audio),
-                                "error sending audio message {err}"
-                            );
+                            log_error!(audio_topic.send(msg), "error sending audio message {err}");
                         }
-                        if audio_channel_send.is_full() {
-                            match audio_channel_recv.try_recv() {
-                                Ok((stamp, _)) => {
-                                    ros_warn!(
-                                        "recording from {stamp} was dropped, ssloc operation too \
-                                         slow"
-                                    );
+                        if !recording_only {
+                            if audio_channel_send.is_full() {
+                                match audio_channel_recv.try_recv() {
+                                    Ok((stamp, _)) => {
+                                        ros_warn!(
+                                            "recording from {stamp} was dropped, ssloc operation \
+                                             too slow"
+                                        );
+                                    }
+                                    Err(TryRecvError::Empty) => { /* was emptied by consumer */ }
+                                    Err(TryRecvError::Disconnected) => {
+                                        ros_err!("channel disconnected, process must have exited");
+                                        return Ok(());
+                                    }
                                 }
-                                Err(TryRecvError::Empty) => { /* was emptied by consumer */ }
-                                Err(TryRecvError::Disconnected) => {
+                            }
+                            match audio_channel_send.try_send((stamp, audio)) {
+                                Ok(_) => {}
+                                Err(_) => {
                                     ros_err!("channel disconnected, process must have exited");
                                     return Ok(());
                                 }
-                            }
-                        }
-                        match audio_channel_send.try_send((stamp, audio)) {
-                            Ok(_) => {}
-                            Err(_) => {
-                                ros_err!("channel disconnected, process must have exited");
-                                return Ok(());
                             }
                         }
                     }
@@ -783,7 +885,7 @@ fn ssloc(
                                 iter::repeat(vec![0.0; length]).take(channels.len() - channel),
                             );
                             mapping.extend(iter::repeat(-1).take(channels.len() - channel));
-                            let data = das.delay_and_sum(track.direction, &audio).collect_vec();
+                            let data = das.beam_form(track.direction, &audio).collect_vec();
                             assert_eq!(data.len(), length);
                             channels.push(data);
                             mapping.push(track.id);

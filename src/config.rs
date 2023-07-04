@@ -33,8 +33,7 @@ impl From<&Device> for Variant {
 pub struct Config {
     pub format: Format,
     pub rate: u16,
-    pub use_audio_messages: bool,
-    pub audio_message_topic: String,
+    pub audio_message_topic: Option<String>,
     pub device: Device,
     pub devices: Vec<Device>,
     pub localisation_frame: f64,
@@ -99,8 +98,7 @@ impl Config {
         Ok(Config {
             format: devices[0].formats[0],
             rate: devices[0].rate.0,
-            use_audio_messages: false,
-            audio_message_topic: String::new(),
+            audio_message_topic: None,
             device: devices[0].clone(),
             localisation_frame: 1.0,
             channels: devices[0].channels.0,
@@ -109,7 +107,7 @@ impl Config {
             max_sources: 5,
             mbss: MbssConfig::default(),
             mbss_ssl_threshold: 5000.,
-            tracking_persistence: 1.
+            tracking_persistence: 1.,
         })
     }
 }
@@ -182,11 +180,20 @@ impl rosrust_dynamic_reconfigure::Config for Config {
 
     fn properties(&self) -> Vec<Property> {
         let mut props = vec![
-            Property::new("recording/use_audio_messages", self.use_audio_messages).group(AUDIO_GROUP),
-            Property::new("recording/audio_message_topic", &self.audio_message_topic).group(AUDIO_GROUP),
-            Property::new_enum("recording/device", &self.device.name, &self.devices).group(AUDIO_GROUP),
-            Property::new_range("recording/rate", self.rate, self.device.rate.0, self.device.rate.1)
+            Property::new(
+                "recording/audio_message_topic",
+                self.audio_message_topic.as_deref().unwrap_or_default(),
+            )
+            .group(AUDIO_GROUP),
+            Property::new_enum("recording/device", &self.device.name, &self.devices)
                 .group(AUDIO_GROUP),
+            Property::new_range(
+                "recording/rate",
+                self.rate,
+                self.device.rate.0,
+                self.device.rate.1,
+            )
+            .group(AUDIO_GROUP),
             Property::new_enum(
                 "recording/format",
                 self.format.to_string(),
@@ -208,7 +215,10 @@ impl rosrust_dynamic_reconfigure::Config for Config {
                 self.device.channels.1,
             )
             .group(AUDIO_GROUP),
-            Property::new_enum("mbss/pooling", self.mbss.pooling.to_string(), ["max", "sum"]).group(MBSS_GROUP),
+            Property::new_enum("mbss/pooling", self.mbss.pooling.to_string(), [
+                "max", "sum",
+            ])
+            .group(MBSS_GROUP),
             Property::new_default_range(
                 "mbss/ssl_threshold",
                 self.mbss_ssl_threshold,
@@ -218,8 +228,14 @@ impl rosrust_dynamic_reconfigure::Config for Config {
             )
             .group(MBSS_GROUP),
             // TODO spectrum_method
-            Property::new_default_range("mbss/azimuth/min", self.mbss.azimuth_range.0, -PI, -PI, PI)
-                .group(MBSS_GROUP),
+            Property::new_default_range(
+                "mbss/azimuth/min",
+                self.mbss.azimuth_range.0,
+                -PI,
+                -PI,
+                PI,
+            )
+            .group(MBSS_GROUP),
             Property::new_default_range("mbss/azimuth/max", self.mbss.azimuth_range.1, PI, -PI, PI)
                 .group(MBSS_GROUP),
             Property::new_default_range(
@@ -238,31 +254,13 @@ impl rosrust_dynamic_reconfigure::Config for Config {
                 PI / 2.,
             )
             .group(MBSS_GROUP),
-            Property::new_default_range(
-                "mbss/grid_res",
-                self.mbss.grid_res,
-                0.02,
-                0.01,
-                0.5,
-            )
-            .group(MBSS_GROUP),
-            Property::new_default_range(
-                "mbss/alpha_res",
-                self.mbss.alpha_res,
-                0.02,
-                0.01,
-                0.5,
-            )
-            .group(MBSS_GROUP),
-            Property::new_default_range(
-                "mbss/min_angle",
-                self.mbss.min_angle,
-                0.1,
-                0.01,
-                0.5,
-            )
-            .description("minimal angle between two audio sources")
-            .group(MBSS_GROUP),
+            Property::new_default_range("mbss/grid_res", self.mbss.grid_res, 0.02, 0.01, 0.5)
+                .group(MBSS_GROUP),
+            Property::new_default_range("mbss/alpha_res", self.mbss.alpha_res, 0.02, 0.01, 0.5)
+                .group(MBSS_GROUP),
+            Property::new_default_range("mbss/min_angle", self.mbss.min_angle, 0.1, 0.01, 0.5)
+                .description("minimal angle between two audio sources")
+                .group(MBSS_GROUP),
             Property::new_default_range(
                 "mbss/tracking_persistence",
                 self.tracking_persistence,
@@ -299,8 +297,13 @@ impl rosrust_dynamic_reconfigure::Config for Config {
     fn set(&mut self, name: &str, value: Value) -> rosrust::error::Result<()> {
         ros_info!("Setting: {name}={value}");
         match name {
-            "recording/use_audio_messages" => self.use_audio_messages = value.as_bool(name)?,
-            "recording/audio_message_topic" => self.audio_message_topic = value.as_string(name)?,
+            "recording/audio_message_topic" => {
+                self.audio_message_topic = {
+                    let value = value.as_string(name)?;
+                    let value = value.trim();
+                    (!value.is_empty()).then_some(value.to_owned())
+                }
+            }
             "recording/device" => {
                 let value = value.as_string(name)?;
                 self.device = self
