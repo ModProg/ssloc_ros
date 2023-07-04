@@ -1673,9 +1673,9 @@ dependencies = [
 
 [[package]]
 name = "ssloc"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2244d6603d93df924e5b57cc4869a9b7424c1e01da7f78289d4f7959c1e8525e"
+checksum = "5f9331524f34bb064baa8ec0e3576626ebe57d808671d451e899120564d3e49c"
 dependencies = [
  "alsa",
  "derive_more",
