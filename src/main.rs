@@ -730,7 +730,7 @@ fn ssloc(
                     };
                     // Assign channels to tracks without channels
                     let mut min = 0;
-                    *last_tracks = sources
+                    let mut sources = sources
                         .iter()
                         .map(|&(mut t)| {
                             if t.channel.is_some() {
@@ -743,7 +743,8 @@ fn ssloc(
                                 t
                             }
                         })
-                        .collect();
+                        .collect_vec();
+                    *last_tracks = sources.clone();
                     drop(last_tracks);
                     if unit_sphere_sst.has_subscribers() {
                         log_error!(
