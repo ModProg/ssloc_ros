@@ -875,11 +875,11 @@ fn ssloc(
                         let mut mapping = Vec::new();
                         sources.sort_by_key(|t| t.channel.expect("all channels are set"));
                         let length = das.expected_len(&audio);
-                        for track in sources {
+                        for track in &sources {
                             let channel = track.channel.unwrap();
                             assert!(
                                 channels.len() <= channel,
-                                "channels should be sorted correctly"
+                                "channels should be sorted correctly, {sources:?}"
                             );
                             // insert empty data for unused channels
                             channels.extend(
