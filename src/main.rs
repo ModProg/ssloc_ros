@@ -450,12 +450,12 @@ fn ssloc(
 ) -> impl FnOnce() -> Result {
     move || {
         let arrow_markers = rosrust::publish::<msgs::Marker>("~arrow_markers", 20)?;
-        let unit_sphere_sst = rosrust::publish::<msgs::SstArray>("~unit_sphere_sst", 20)?;
+        let unit_sphere_sst = rosrust::publish::<msgs::SstArray>("~sst", 20)?;
         let unit_sphere_sst_poses =
-            rosrust::publish::<msgs::PoseArray>("~unit_sphere_sst_poses", 20)?;
-        let unit_sphere_ssl = rosrust::publish::<msgs::SslArray>("~unit_sphere_ssl", 20)?;
+            rosrust::publish::<msgs::PoseArray>("~sst/poses", 20)?;
+        let unit_sphere_ssl = rosrust::publish::<msgs::SslArray>("~ssl", 20)?;
         let unit_sphere_ssl_points =
-            rosrust::publish::<msgs::PointCloud2>("~unit_sphere_ssl_points", 20)?;
+            rosrust::publish::<msgs::PointCloud2>("~ssl/points", 20)?;
         let spectrums = rosrust::publish::<msgs::CompressedImage>("~intensity/compressed", 20)?;
         let mut sss_mapping = rosrust::publish::<msgs::SssMapping>("~sss/mapping", 10)?;
         let sss_audio_topic = rosrust::publish::<msgs::AudioData>("~sss/audio", 10)?;
