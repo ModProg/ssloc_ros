@@ -456,7 +456,7 @@ fn ssloc(
         let unit_sphere_ssl = rosrust::publish::<msgs::SslArray>("~unit_sphere_ssl", 20)?;
         let unit_sphere_ssl_points =
             rosrust::publish::<msgs::PointCloud2>("~unit_sphere_ssl_points", 20)?;
-        let spectrums = rosrust::publish::<msgs::CompressedImage>("~spectrum/compressed", 20)?;
+        let spectrums = rosrust::publish::<msgs::CompressedImage>("~intensity/compressed", 20)?;
         let mut sss_mapping = rosrust::publish::<msgs::SssMapping>("~sss/mapping", 10)?;
         let sss_audio_topic = rosrust::publish::<msgs::AudioData>("~sss/audio", 10)?;
         #[cfg(feature = "audio_common_msgs-stamped")]
